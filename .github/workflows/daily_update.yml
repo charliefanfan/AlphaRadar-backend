@@ -1,0 +1,35 @@
+name: Daily ETF Update
+
+on:
+  schedule:
+    # UTC 23:00 weekdays = US Eastern 7pm (after ARK publishes holdings)
+    - cron: '0 23 * * 1-5'
+  workflow_dispatch:   # allow manual trigger from GitHub UI
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run ETF fetch
+        run: python scripts/fetch_holdings.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "ETL failed on ${{ github.run_id }} — check logs above"

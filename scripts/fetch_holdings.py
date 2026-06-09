@@ -5,49 +5,65 @@ from supabase import create_client
 import os
 import time
 
-# ── Supabase client ──────────────────────────────────────────────────────────
+# ── Supabase client ───────────────────────────────────────────────────────────
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ── ETF sources (updated June 2026) ──────────────────────────────────────────
+# ── ETF sources ───────────────────────────────────────────────────────────────
 ARK_ETFS = {
     "ARKK": "https://assets.ark-funds.com/fund-documents/funds-etf-csv/ARK_INNOVATION_ETF_ARKK_HOLDINGS.csv",
     "ARKW": "https://assets.ark-funds.com/fund-documents/funds-etf-csv/ARK_NEXT_GENERATION_INTERNET_ETF_ARKW_HOLDINGS.csv",
     "ARKG": "https://assets.ark-funds.com/fund-documents/funds-etf-csv/ARK_GENOMIC_REVOLUTION_ETF_ARKG_HOLDINGS.csv",
     "ARKF": "https://assets.ark-funds.com/fund-documents/funds-etf-csv/ARK_FINTECH_INNOVATION_ETF_ARKF_HOLDINGS.csv",
-    "ARKQ": "https://assets.ark-funds.com/fund-documents/funds-etf-csv/ARK_AUTONOMOUS_TECHNOLOGY_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
+    # ARKQ uses a different filename pattern
+    "ARKQ": "https://assets.ark-funds.com/fund-documents/funds-etf-csv/ARK_AUTONOMOUS_TECH_&_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
 }
 
-TODAY = date.today().isoformat()
+TODAY     = date.today().isoformat()
 YESTERDAY = (date.today() - timedelta(days=1)).isoformat()
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; AlphaRadar/1.0)"}
+HEADERS   = {"User-Agent": "Mozilla/5.0 (compatible; AlphaRadar/1.0)"}
+
+# ARK CSV has NO header row — columns are in this fixed order:
+# date | fund | company | ticker | cusip | shares | market_value | weight
+ARK_COLS = ["date", "fund", "company", "ticker", "cusip", "shares", "market_value", "weight"]
 
 
 # ── Fetch ARK CSV ─────────────────────────────────────────────────────────────
-def fetch_ark(ticker: str, url: str):
+def fetch_ark(etf_ticker: str, url: str):
     try:
         resp = requests.get(url, headers=HEADERS, timeout=30)
         resp.raise_for_status()
         from io import StringIO
-        df = pd.read_csv(StringIO(resp.text), skiprows=1)
-        df.columns = [c.strip().lower() for c in df.columns]
-        ticker_col  = next((c for c in df.columns if "ticker"  in c), None)
-        company_col = next((c for c in df.columns if "company" in c), None)
-        weight_col  = next((c for c in df.columns if "weight"  in c), None)
-        if not all([ticker_col, company_col, weight_col]):
-            print(f"  [{ticker}] unexpected columns: {list(df.columns)}")
-            return None
-        df = df[[ticker_col, company_col, weight_col]].copy()
-        df.columns = ["ticker", "company", "weight"]
-        df = df.dropna(subset=["ticker"])
-        df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
+
+        # No header — assign column names manually
+        df = pd.read_csv(StringIO(resp.text), header=None, names=ARK_COLS)
+
+        # Drop rows where ticker looks like a header or is empty
+        df = df[df["ticker"].notna()]
+        df = df[~df["ticker"].astype(str).str.lower().isin(["ticker", "nan", ""])]
+
+        # Clean weight: "10.12%" → 10.12
+        df["weight"] = (
+            df["weight"].astype(str)
+            .str.replace("%", "", regex=False)
+            .str.replace(",", "", regex=False)
+            .str.strip()
+        )
         df["weight"] = pd.to_numeric(df["weight"], errors="coerce").fillna(0.0)
-        df["etf"]  = ticker
-        df["date"] = TODAY
-        return df[df["ticker"] != "NAN"]
+
+        df["ticker"]  = df["ticker"].astype(str).str.strip().str.upper()
+        df["company"] = df["company"].astype(str).str.strip()
+        df["etf"]     = etf_ticker
+        df["date"]    = TODAY
+
+        result = df[["etf", "ticker", "company", "weight", "date"]]
+        result = result[result["ticker"] != "NAN"]
+        print(f"  [{etf_ticker}] parsed {len(result)} holdings, sample: {result['ticker'].head(3).tolist()}")
+        return result
+
     except Exception as e:
-        print(f"  [{ticker}] fetch error: {e}")
+        print(f"  [{etf_ticker}] fetch error: {e}")
         return None
 
 
@@ -123,6 +139,8 @@ def generate_multi_etf_signals():
     if signals:
         supabase.table("holding_changes").insert(signals).execute()
         print(f"  Generated {len(signals)} multi-ETF signals")
+    else:
+        print("  No multi-ETF signals today")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -135,7 +153,7 @@ def run():
         print(f"Fetching {ticker}...")
         df = fetch_ark(ticker, url)
         if df is not None and not df.empty:
-            records = df[["etf", "ticker", "company", "weight", "date"]].to_dict("records")
+            records = df.to_dict("records")
             for i in range(0, len(records), 100):
                 supabase.table("holdings").upsert(records[i:i+100]).execute()
             changes = detect_changes(ticker, df)

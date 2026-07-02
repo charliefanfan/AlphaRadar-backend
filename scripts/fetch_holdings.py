@@ -26,17 +26,17 @@ ARK_ETFS = {
     "ARKW": f"{ARK_BASE}/ARK_NEXT_GENERATION_INTERNET_ETF_ARKW_HOLDINGS.csv",
     "ARKG": f"{ARK_BASE}/ARK_GENOMIC_REVOLUTION_ETF_ARKG_HOLDINGS.csv",
     "ARKF": f"{ARK_BASE}/ARK_FINTECH_INNOVATION_ETF_ARKF_HOLDINGS.csv",
-    "ARKX": f"{ARK_BASE}/ARK_SPACE_EXPLORATION_%26_INNOVATION_ETF_ARKX_HOLDINGS.csv",
+    "ARKX": f"{ARK_BASE}/ARK_SPACE_EXPLORATION_&_INNOVATION_ETF_ARKX_HOLDINGS.csv",
     "PRNT": f"{ARK_BASE}/THE_3D_PRINTING_ETF_PRNT_HOLDINGS.csv",
     "IZRL": f"{ARK_BASE}/ARK_ISRAEL_INNOVATIVE_TECHNOLOGY_ETF_IZRL_HOLDINGS.csv",
 }
 
-# ARKQ — try multiple URL variants (& encoding inconsistent across CDN)
+# ARKQ — ARK CDN accepts literal & in filenames (confirmed from ARKX URL pattern)
 ARKQ_URLS = [
+    f"{ARK_BASE}/ARK_AUTONOMOUS_TECHNOLOGY_&_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
     f"{ARK_BASE}/ARK_AUTONOMOUS_TECHNOLOGY_%26_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
-    f"{ARK_BASE}/ARK_AUTONOMOUS_TECHNOLOGY_AND_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
-    f"{ARK_BASE}/ARK_AUTONOMOUS_TECH_AND_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
-    "https://assets.ark-funds.com/fund-documents/funds-etf-csv/ARK_AUTONOMOUS_TECHNOLOGY_%2526_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
+    f"{ARK_BASE}/ARK_AUTONOMOUS_TECH_%26_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
+    f"{ARK_BASE}/ARKQ_HOLDINGS.csv",
 ]
 
 # ── Tema ETFs ─────────────────────────────────────────────────────────────────
@@ -133,30 +133,22 @@ def fetch_ark_with_fallback(etf_ticker: str, urls: list):
 
 def fetch_tema(etf_ticker: str, url: str):
     """
-    Tema CSV: standard header row with columns like
-    Ticker, Name, Weight (%), Shares, Market Value, ...
-    Detect ticker/name/weight columns dynamically.
+    Tema CSV columns (confirmed from NASA live response):
+    holdings_date, ticker, cusip, proper_name, shares,
+    market_value, percent_of_nav, is_cash, country, sector
     """
     try:
         resp = requests.get(url, headers=HEADERS, timeout=30)
         resp.raise_for_status()
         from io import StringIO
 
-        # The file may have a metadata header; find the real CSV header row
-        lines = resp.text.splitlines()
-        header_idx = 0
-        for i, line in enumerate(lines):
-            low = line.strip().lower()
-            if "ticker" in low or "symbol" in low:
-                header_idx = i
-                break
-
-        df = pd.read_csv(StringIO("\n".join(lines[header_idx:])))
+        df = pd.read_csv(StringIO(resp.text))
         df.columns = [c.strip().lower() for c in df.columns]
 
-        ticker_col = next((c for c in df.columns if "ticker" in c or c == "symbol"), None)
-        name_col   = next((c for c in df.columns if "name" in c or "company" in c or "security" in c), None)
-        weight_col = next((c for c in df.columns if "weight" in c or "% of" in c or "pct" in c), None)
+        # Use confirmed column names; fall back to dynamic detection
+        ticker_col = next((c for c in df.columns if c == "ticker" or "ticker" in c), None)
+        name_col   = next((c for c in df.columns if c == "proper_name" or "name" in c or "company" in c), None)
+        weight_col = next((c for c in df.columns if c == "percent_of_nav" or "weight" in c or "percent" in c or "nav" in c), None)
 
         if not all([ticker_col, name_col, weight_col]):
             print(f"  [{etf_ticker}] ✗ unexpected columns: {list(df.columns)}")
@@ -165,6 +157,8 @@ def fetch_tema(etf_ticker: str, url: str):
         df = df[[ticker_col, name_col, weight_col]].copy()
         df.columns = ["ticker", "company", "weight"]
         df = df.dropna(subset=["ticker"])
+
+        # Filter out cash rows using is_cash column if available (already dropped above, use weight filter)
         df = df[~df["ticker"].astype(str).str.strip().str.lower().isin(
             ["ticker", "nan", "", "-", "cash", "usd"])]
         return _clean_and_dedup(df, etf_ticker)

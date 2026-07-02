@@ -16,7 +16,7 @@ YESTERDAY = (date.today() - timedelta(days=1)).isoformat()
 HEADERS   = {"User-Agent": "Mozilla/5.0 (compatible; AlphaRadar/1.0)"}
 
 # ── ARK ETFs ──────────────────────────────────────────────────────────────────
-# CSV format: no header row, fixed columns:
+# CSV: no header row, 8 fixed columns
 # date | fund | company | ticker | cusip | shares | market_value | weight
 ARK_BASE = "https://assets.ark-funds.com/fund-documents/funds-etf-csv"
 ARK_COLS  = ["date", "fund", "company", "ticker", "cusip", "shares", "market_value", "weight"]
@@ -27,47 +27,31 @@ ARK_ETFS = {
     "ARKG": f"{ARK_BASE}/ARK_GENOMIC_REVOLUTION_ETF_ARKG_HOLDINGS.csv",
     "ARKF": f"{ARK_BASE}/ARK_FINTECH_INNOVATION_ETF_ARKF_HOLDINGS.csv",
     "ARKX": f"{ARK_BASE}/ARK_SPACE_EXPLORATION_%26_INNOVATION_ETF_ARKX_HOLDINGS.csv",
-    # ARKQ — try multiple filename variants (& encoding varies by ARK CDN)
-    # The first that returns 200 will be used (see fetch_ark_with_fallback)
     "PRNT": f"{ARK_BASE}/THE_3D_PRINTING_ETF_PRNT_HOLDINGS.csv",
     "IZRL": f"{ARK_BASE}/ARK_ISRAEL_INNOVATIVE_TECHNOLOGY_ETF_IZRL_HOLDINGS.csv",
 }
 
-# ARKQ needs special handling — try multiple URL variants
+# ARKQ — try multiple URL variants (& encoding inconsistent across CDN)
 ARKQ_URLS = [
-    f"{ARK_BASE}/ARK_AUTONOMOUS_TECHNOLOGY_%26_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",   # %26 encoded
-    f"{ARK_BASE}/ARK_AUTONOMOUS_TECHNOLOGY_&_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",      # literal &
-    f"{ARK_BASE}/ARK_AUTONOMOUS_TECH_AND_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",          # AND variant
+    f"{ARK_BASE}/ARK_AUTONOMOUS_TECHNOLOGY_%26_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
+    f"{ARK_BASE}/ARK_AUTONOMOUS_TECHNOLOGY_AND_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
+    f"{ARK_BASE}/ARK_AUTONOMOUS_TECH_AND_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
+    "https://assets.ark-funds.com/fund-documents/funds-etf-csv/ARK_AUTONOMOUS_TECHNOLOGY_%2526_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
 ]
 
-# ── Roundhill ETFs ────────────────────────────────────────────────────────────
-# Full-holdings page has a "Download CSV" button. The direct CSV URL follows
-# the pattern: roundhillinvestments.com/etf/{ticker_lower}/etf-holdings.csv
-# (the page at /full-holdings serves JS but the CSV endpoint is separate)
-ROUNDHILL_ETFS = {
-    "CHAT": "https://www.roundhillinvestments.com/etf/chat/etf-holdings.csv",
-}
-
 # ── Tema ETFs ─────────────────────────────────────────────────────────────────
-# temaetfs.com publishes a daily holdings file. Format TBD on first run.
+# Official CSV URL confirmed from temaetfs.com/nasa page source
 TEMA_ETFS = {
-    "NASA": "https://temaetfs.com/etf-holdings/nasa-daily-holdings.csv",
-}
-
-# ── iShares ETFs ─────────────────────────────────────────────────────────────
-ISHARES_ETFS = {
-    "IETC": {
-        "url": "https://www.ishares.com/us/products/292425/ishares-us-tech-independence-focused-etf/1467271812596.ajax?fileType=csv&fileName=IETC_holdings&dataType=fund",
-    },
+    "NASA": "https://temaetfs.com/hubfs/Website/Holdings/NASA-holdings.csv",
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FETCH FUNCTIONS
+# SHARED HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _clean_and_dedup(df, etf_ticker):
-    """Shared post-processing: clean weight, deduplicate on (etf, ticker, date)."""
+    """Clean weight column, tag etf/date, deduplicate on (etf, ticker, date)."""
     df["weight"] = (
         df["weight"].astype(str)
         .str.replace("%", "", regex=False)
@@ -81,7 +65,7 @@ def _clean_and_dedup(df, etf_ticker):
     df["date"]    = TODAY
 
     result = df[["etf", "ticker", "company", "weight", "date"]]
-    result = result[~result["ticker"].isin(["NAN", "", "-"])]
+    result = result[~result["ticker"].isin(["NAN", "", "-", "TICKER"])]
     result = result[result["weight"] > 0]
 
     before = len(result)
@@ -94,6 +78,23 @@ def _clean_and_dedup(df, etf_ticker):
     print(f"  [{etf_ticker}] {len(result)} holdings — top: {result['ticker'].head(3).tolist()}")
     return result
 
+
+def save_etf(ticker: str, df) -> bool:
+    if df is None or df.empty:
+        return False
+    records = df.to_dict("records")
+    for i in range(0, len(records), 100):
+        supabase.table("holdings").upsert(records[i:i+100]).execute()
+    changes = detect_changes(ticker, df)
+    if changes:
+        supabase.table("holding_changes").insert(changes).execute()
+    print(f"  ✓ saved, {len(changes)} changes detected")
+    return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FETCH FUNCTIONS
+# ─────────────────────────────────────────────────────────────────────────────
 
 def fetch_ark(etf_ticker: str, url: str):
     """ARK CSV: no header row, fixed 8-column format."""
@@ -111,12 +112,12 @@ def fetch_ark(etf_ticker: str, url: str):
 
 
 def fetch_ark_with_fallback(etf_ticker: str, urls: list):
-    """Try multiple URL variants until one succeeds (used for ARKQ)."""
+    """Try multiple URL variants; use first that returns HTTP 200."""
     for i, url in enumerate(urls):
         try:
             resp = requests.get(url, headers=HEADERS, timeout=30)
             if resp.status_code == 200:
-                print(f"  [{etf_ticker}] URL variant {i+1} succeeded")
+                print(f"  [{etf_ticker}] variant {i+1} OK")
                 from io import StringIO
                 df = pd.read_csv(StringIO(resp.text), header=None, names=ARK_COLS)
                 df = df[df["ticker"].notna()]
@@ -126,36 +127,36 @@ def fetch_ark_with_fallback(etf_ticker: str, urls: list):
                 print(f"  [{etf_ticker}] variant {i+1} → HTTP {resp.status_code}")
         except Exception as e:
             print(f"  [{etf_ticker}] variant {i+1} ✗ {e}")
-    print(f"  [{etf_ticker}] all URL variants failed")
+    print(f"  [{etf_ticker}] all variants failed — skipping")
     return None
 
 
-def fetch_ishares(etf_ticker: str, url: str):
+def fetch_tema(etf_ticker: str, url: str):
     """
-    iShares CSV: starts with fund metadata rows, then a header row
-    beginning with 'Ticker', then holdings, then footer disclaimers.
-    Detect header row dynamically.
+    Tema CSV: standard header row with columns like
+    Ticker, Name, Weight (%), Shares, Market Value, ...
+    Detect ticker/name/weight columns dynamically.
     """
     try:
         resp = requests.get(url, headers=HEADERS, timeout=30)
         resp.raise_for_status()
         from io import StringIO
+
+        # The file may have a metadata header; find the real CSV header row
         lines = resp.text.splitlines()
-        header_idx = next(
-            (i for i, l in enumerate(lines)
-             if l.strip().lower().startswith("ticker,") or l.strip().lower().startswith('"ticker",')),
-            None
-        )
-        if header_idx is None:
-            print(f"  [{etf_ticker}] ✗ could not find header row")
-            return None
+        header_idx = 0
+        for i, line in enumerate(lines):
+            low = line.strip().lower()
+            if "ticker" in low or "symbol" in low:
+                header_idx = i
+                break
 
         df = pd.read_csv(StringIO("\n".join(lines[header_idx:])))
         df.columns = [c.strip().lower() for c in df.columns]
 
-        ticker_col = next((c for c in df.columns if c == "ticker"), None)
-        name_col   = next((c for c in df.columns if "name" in c), None)
-        weight_col = next((c for c in df.columns if "weight" in c), None)
+        ticker_col = next((c for c in df.columns if "ticker" in c or c == "symbol"), None)
+        name_col   = next((c for c in df.columns if "name" in c or "company" in c or "security" in c), None)
+        weight_col = next((c for c in df.columns if "weight" in c or "% of" in c or "pct" in c), None)
 
         if not all([ticker_col, name_col, weight_col]):
             print(f"  [{etf_ticker}] ✗ unexpected columns: {list(df.columns)}")
@@ -166,68 +167,6 @@ def fetch_ishares(etf_ticker: str, url: str):
         df = df.dropna(subset=["ticker"])
         df = df[~df["ticker"].astype(str).str.strip().str.lower().isin(
             ["ticker", "nan", "", "-", "cash", "usd"])]
-        return _clean_and_dedup(df, etf_ticker)
-    except Exception as e:
-        print(f"  [{etf_ticker}] ✗ {e}")
-        return None
-
-
-def fetch_roundhill(etf_ticker: str, url: str):
-    """
-    Roundhill CSV: has a header row. Typical columns:
-    Ticker, Name, Weight (%), Shares, Market Value
-    """
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=30)
-        resp.raise_for_status()
-        from io import StringIO
-        df = pd.read_csv(StringIO(resp.text))
-        df.columns = [c.strip().lower() for c in df.columns]
-
-        ticker_col = next((c for c in df.columns if "ticker" in c or c == "symbol"), None)
-        name_col   = next((c for c in df.columns if "name" in c or "company" in c or "security" in c), None)
-        weight_col = next((c for c in df.columns if "weight" in c or "%" in c), None)
-
-        if not all([ticker_col, name_col, weight_col]):
-            print(f"  [{etf_ticker}] ✗ unexpected columns: {list(df.columns)}")
-            return None
-
-        df = df[[ticker_col, name_col, weight_col]].copy()
-        df.columns = ["ticker", "company", "weight"]
-        df = df.dropna(subset=["ticker"])
-        df = df[~df["ticker"].astype(str).str.strip().str.lower().isin(
-            ["ticker", "nan", "", "-", "cash"])]
-        return _clean_and_dedup(df, etf_ticker)
-    except Exception as e:
-        print(f"  [{etf_ticker}] ✗ {e}")
-        return None
-
-
-def fetch_tema(etf_ticker: str, url: str):
-    """
-    Tema ETFs: similar structure to Roundhill — header row CSV.
-    Column names may differ; detect dynamically.
-    """
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=30)
-        resp.raise_for_status()
-        from io import StringIO
-        df = pd.read_csv(StringIO(resp.text))
-        df.columns = [c.strip().lower() for c in df.columns]
-
-        ticker_col = next((c for c in df.columns if "ticker" in c or "symbol" in c), None)
-        name_col   = next((c for c in df.columns if "name" in c or "company" in c or "security" in c), None)
-        weight_col = next((c for c in df.columns if "weight" in c or "%" in c or "pct" in c), None)
-
-        if not all([ticker_col, name_col, weight_col]):
-            print(f"  [{etf_ticker}] ✗ unexpected columns: {list(df.columns)}")
-            return None
-
-        df = df[[ticker_col, name_col, weight_col]].copy()
-        df.columns = ["ticker", "company", "weight"]
-        df = df.dropna(subset=["ticker"])
-        df = df[~df["ticker"].astype(str).str.strip().str.lower().isin(
-            ["ticker", "nan", "", "-", "cash"])]
         return _clean_and_dedup(df, etf_ticker)
     except Exception as e:
         print(f"  [{etf_ticker}] ✗ {e}")
@@ -311,71 +250,35 @@ def generate_multi_etf_signals():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SAVE TO SUPABASE
-# ─────────────────────────────────────────────────────────────────────────────
-
-def save_etf(ticker: str, df):
-    if df is None or df.empty:
-        return False
-    records = df.to_dict("records")
-    for i in range(0, len(records), 100):
-        supabase.table("holdings").upsert(records[i:i+100]).execute()
-    changes = detect_changes(ticker, df)
-    if changes:
-        supabase.table("holding_changes").insert(changes).execute()
-    print(f"  ✓ saved, {len(changes)} changes detected")
-    return True
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run():
     print(f"AlphaRadar ETL — {TODAY}")
     print("=" * 55)
-    success, all_changes = 0, []
+    success = 0
 
-    # ── ARK ETFs ─────────────────────────────────────────
+    # ── ARK core ─────────────────────────────────────────
     for ticker, url in ARK_ETFS.items():
         print(f"\nFetching {ticker} (ARK)...")
-        df = fetch_ark(ticker, url)
-        if save_etf(ticker, df):
+        if save_etf(ticker, fetch_ark(ticker, url)):
             success += 1
         time.sleep(1)
 
-    # ── ARKQ — try multiple URL variants ─────────────────
+    # ── ARKQ fallback ─────────────────────────────────────
     print(f"\nFetching ARKQ (ARK, multi-URL fallback)...")
-    df = fetch_ark_with_fallback("ARKQ", ARKQ_URLS)
-    if save_etf("ARKQ", df):
+    if save_etf("ARKQ", fetch_ark_with_fallback("ARKQ", ARKQ_URLS)):
         success += 1
     time.sleep(1)
 
-    # ── Roundhill ETFs ────────────────────────────────────
-    for ticker, url in ROUNDHILL_ETFS.items():
-        print(f"\nFetching {ticker} (Roundhill)...")
-        df = fetch_roundhill(ticker, url)
-        if save_etf(ticker, df):
-            success += 1
-        time.sleep(1)
-
-    # ── Tema ETFs ─────────────────────────────────────────
+    # ── Tema ──────────────────────────────────────────────
     for ticker, url in TEMA_ETFS.items():
         print(f"\nFetching {ticker} (Tema)...")
-        df = fetch_tema(ticker, url)
-        if save_etf(ticker, df):
+        if save_etf(ticker, fetch_tema(ticker, url)):
             success += 1
         time.sleep(1)
 
-    # ── iShares ETFs ──────────────────────────────────────
-    for ticker, info in ISHARES_ETFS.items():
-        print(f"\nFetching {ticker} (iShares)...")
-        df = fetch_ishares(ticker, info["url"])
-        if save_etf(ticker, df):
-            success += 1
-        time.sleep(1)
-
-    total = len(ARK_ETFS) + 1 + len(ROUNDHILL_ETFS) + len(TEMA_ETFS) + len(ISHARES_ETFS)
+    total = len(ARK_ETFS) + 1 + len(TEMA_ETFS)
     print(f"\nGenerating cross-ETF signals...")
     generate_multi_etf_signals()
     print(f"\n{'='*55}")

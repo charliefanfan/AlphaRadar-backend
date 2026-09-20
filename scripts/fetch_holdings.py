@@ -472,10 +472,25 @@ def fetch_tema(etf_ticker: str, url: str):
         return None
 
 
-
 def fetch_ishares(etf_ticker: str, product_id: str):
-    """Fetch an iShares holdings CSV and normalize it to AlphaRadar format."""
+    """Fetch an iShares holdings CSV and normalize it to AlphaRadar format.
+
+    iShares CSVs are "ragged": a handful of 1-field metadata rows at the
+    top (fund name, "as of" date, etc.), then the real header + data rows,
+    then trailing disclaimer/footnote text that often contains embedded
+    commas. Handing the *whole* file straight to pandas' C parser with
+    header=None locks the expected column count to the first row (1 field)
+    and then blows up ("Expected 1 fields in line 16, saw 4") the moment a
+    wider row shows up — before we ever get a chance to look for the
+    header row.
+
+    Fix: scan for the header row using csv.reader() line-by-line (which
+    tolerates ragged files fine, since it doesn't enforce one column count
+    across the whole document), then let pandas parse only from that row
+    onward, skipping any bad trailing rows.
+    """
     from io import StringIO
+    import csv
 
     endpoint = (
         f"https://www.ishares.com/us/products/{product_id}/"
@@ -506,27 +521,36 @@ def fetch_ishares(etf_ticker: str, product_id: str):
             if resp.status_code != 200 or len(resp.text) < 100:
                 continue
 
-            # iShares CSVs contain metadata rows before the actual table.
-            raw = pd.read_csv(StringIO(resp.text), header=None, dtype=str)
-
+            # Find the header row (the one containing "ticker") using
+            # csv.reader per-line, NOT pandas — pandas would choke on the
+            # ragged rows before we even locate the header.
+            lines = resp.text.splitlines()
             header_idx = None
-            for idx, row in raw.iterrows():
-                values = {
-                    str(v).strip().lower()
-                    for v in row.tolist()
-                    if pd.notna(v)
-                }
+            for idx, line in enumerate(lines):
+                try:
+                    values = {
+                        v.strip().lower()
+                        for v in next(csv.reader([line]))
+                    }
+                except Exception:
+                    continue
                 if "ticker" in values:
-                    header_idx = int(idx)
+                    header_idx = idx
                     break
 
             if header_idx is None:
                 continue
 
+            # Now parse from the header row onward. Use the python engine
+            # with on_bad_lines="skip" so ragged trailing disclaimer rows
+            # (which may have a different field count) don't blow up the
+            # whole parse.
             df = pd.read_csv(
                 StringIO(resp.text),
                 skiprows=header_idx,
                 dtype=str,
+                on_bad_lines="skip",
+                engine="python",
             )
             df.columns = [str(c).strip() for c in df.columns]
 

@@ -563,6 +563,20 @@ def fetch_ishares(etf_ticker: str, product_id: str):
                     break
 
             if header_idx is None:
+                # DIAGNOSTIC: we got a 200 response of reasonable length,
+                # but no line anywhere contains "ticker" — this is not the
+                # holdings CSV we expect. Most likely iShares returned an
+                # HTML page (redirect, consent wall, error page) instead of
+                # a CSV. Log the response's content-type and a snippet so
+                # this is diagnosable from CI logs.
+                content_type = resp.headers.get("Content-Type", "unknown")
+                snippet = resp.text[:200].replace("\n", " ")
+                print(
+                    f"  [{etf_ticker}] {candidate.isoformat()} → "
+                    f"HTTP {resp.status_code}, content-type={content_type}, "
+                    f"{len(resp.text)} bytes, no 'ticker' row found. "
+                    f"Snippet: {snippet!r}"
+                )
                 continue
 
             # Now parse from the header row onward. Use the python engine

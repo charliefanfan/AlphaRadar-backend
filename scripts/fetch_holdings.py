@@ -1110,44 +1110,42 @@ def inspect_ishares_html(
 # iSHARES
 # ─────────────────────────────────────────────────────────────────────────────
 
-
 def fetch_ishares(
     etf_ticker: str,
     product_id: str
 ):
-
     """
-    Fetch iShares holdings.
+    iShares holdings downloader.
 
     Strategy:
-
-    1. Visit the actual iShares product page.
-    2. Request official holdings CSV endpoint.
-    3. Detect HTML masquerading as CSV.
-    4. Inspect HTML for embedded holdings/API clues.
-    5. If a real CSV is returned, parse it normally.
+    1. Try the direct latest-holdings.csv URL discovered
+       from the iShares HTML page.
+    2. If that fails, try the legacy .ajax endpoint.
+    3. Detect HTML responses instead of sending them to pandas.
+    4. Parse the official iShares holdings CSV.
     """
 
     from io import StringIO
     import csv
 
     # ─────────────────────────────────────────────────────────
-    # Actual product page
+    # URLs
     # ─────────────────────────────────────────────────────────
 
-    product_page = (
+    latest_csv_url = (
         f"https://www.ishares.com/us/products/"
-        f"{product_id}/"
+        f"{product_id}/holdings/latest-holdings.csv"
     )
 
-    # ─────────────────────────────────────────────────────────
-    # Holdings endpoint
-    # ─────────────────────────────────────────────────────────
-
-    endpoint = (
+    legacy_endpoint = (
         f"https://www.ishares.com/us/products/"
         f"{product_id}/holdings/"
         f"1467271812596.ajax"
+    )
+
+    product_page = (
+        f"https://www.ishares.com/us/products/"
+        f"{product_id}/holdings"
     )
 
     # ─────────────────────────────────────────────────────────
@@ -1156,47 +1154,434 @@ def fetch_ishares(
 
     session = requests.Session()
 
-    session.headers.update(
-        HEADERS
-    )
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/150.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language":
+            "en-US,en;q=0.9",
+        "Accept":
+            "text/csv,text/plain,"
+            "application/octet-stream,"
+            "*/*",
+        "Connection":
+            "keep-alive",
+    })
 
     # ─────────────────────────────────────────────────────────
-    # Product page warm-up
+    # Helper: parse iShares CSV
     # ─────────────────────────────────────────────────────────
+
+    def parse_ishares_csv(
+        body: str,
+        source_url: str
+    ):
+
+        if not body or len(body) < 100:
+
+            print(
+                f"  [{etf_ticker}] "
+                f"CSV too short from "
+                f"{source_url}"
+            )
+
+            return None
+
+        # ─────────────────────────────────────────────
+        # Detect HTML
+        # ─────────────────────────────────────────────
+
+        sample = body[:5000].lower()
+
+        if (
+            "<!doctype html" in sample
+            or "<html" in sample
+            or "<head" in sample
+        ):
+
+            print(
+                f"  [{etf_ticker}] "
+                f"source returned HTML "
+                f"instead of CSV"
+            )
+
+            return None
+
+        # ─────────────────────────────────────────────
+        # Find header row
+        # ─────────────────────────────────────────────
+
+        lines = body.splitlines()
+
+        header_idx = None
+
+        for idx, line in enumerate(lines):
+
+            try:
+
+                values = [
+                    v.strip().lower()
+                    for v in next(
+                        csv.reader([line])
+                    )
+                ]
+
+            except Exception:
+
+                continue
+
+            # iShares holdings CSV normally contains
+            # Ticker / Name / Weight (%)
+
+            if (
+                "ticker" in values
+                and (
+                    "name" in values
+                    or "security name" in values
+                )
+            ):
+
+                header_idx = idx
+                break
+
+        if header_idx is None:
+
+            # Second, more permissive search
+            for idx, line in enumerate(lines):
+
+                try:
+
+                    values = [
+                        v.strip().lower()
+                        for v in next(
+                            csv.reader([line])
+                        )
+                    ]
+
+                except Exception:
+
+                    continue
+
+                if "ticker" in values:
+
+                    header_idx = idx
+                    break
+
+        if header_idx is None:
+
+            print(
+                f"  [{etf_ticker}] "
+                f"could not find CSV header "
+                f"from {source_url}"
+            )
+
+            print(
+                f"  [{etf_ticker}] "
+                f"first 500 chars: "
+                f"{body[:500]!r}"
+            )
+
+            return None
+
+        # ─────────────────────────────────────────────
+        # Parse
+        # ─────────────────────────────────────────────
+
+        try:
+
+            df = pd.read_csv(
+                StringIO(body),
+                skiprows=header_idx,
+                dtype=str,
+                on_bad_lines="skip",
+                engine="python",
+            )
+
+        except Exception as e:
+
+            print(
+                f"  [{etf_ticker}] "
+                f"CSV parsing failed: {e}"
+            )
+
+            return None
+
+        df.columns = [
+            str(c).strip()
+            for c in df.columns
+        ]
+
+        print(
+            f"  [{etf_ticker}] "
+            f"CSV columns: "
+            f"{list(df.columns)}"
+        )
+
+        # ─────────────────────────────────────────────
+        # Find columns
+        # ─────────────────────────────────────────────
+
+        ticker_col = next(
+            (
+                c
+                for c in df.columns
+                if c.strip().lower()
+                == "ticker"
+            ),
+            None
+        )
+
+        name_col = next(
+            (
+                c
+                for c in df.columns
+                if c.strip().lower()
+                in {
+                    "name",
+                    "security name",
+                }
+            ),
+            None
+        )
+
+        weight_col = next(
+            (
+                c
+                for c in df.columns
+                if c.strip().lower()
+                in {
+                    "weight (%)",
+                    "weight",
+                }
+            ),
+            None
+        )
+
+        # ─────────────────────────────────────────────
+        # More flexible weight detection
+        # ─────────────────────────────────────────────
+
+        if weight_col is None:
+
+            weight_col = next(
+                (
+                    c
+                    for c in df.columns
+                    if (
+                        "weight"
+                        in c.lower()
+                    )
+                ),
+                None
+            )
+
+        if ticker_col is None:
+
+            print(
+                f"  [{etf_ticker}] "
+                f"Ticker column not found"
+            )
+
+            return None
+
+        if name_col is None:
+
+            print(
+                f"  [{etf_ticker}] "
+                f"Name column not found"
+            )
+
+            return None
+
+        if weight_col is None:
+
+            print(
+                f"  [{etf_ticker}] "
+                f"Weight column not found"
+            )
+
+            return None
+
+        # ─────────────────────────────────────────────
+        # Normalize
+        # ─────────────────────────────────────────────
+
+        df = df[
+            [
+                ticker_col,
+                name_col,
+                weight_col,
+            ]
+        ].copy()
+
+        df.columns = [
+            "ticker",
+            "company",
+            "weight",
+        ]
+
+        df["ticker"] = (
+            df["ticker"]
+            .astype(str)
+            .str.strip()
+            .str.upper()
+        )
+
+        df = df[
+            ~df["ticker"].isin(
+                [
+                    "",
+                    "NAN",
+                    "TICKER",
+                    "CASH",
+                    "USD",
+                    "TOTAL",
+                ]
+            )
+        ]
+
+        # ─────────────────────────────────────────────
+        # Clean weight
+        # ─────────────────────────────────────────────
+
+        df["weight"] = (
+            df["weight"]
+            .astype(str)
+            .str.replace(
+                "%",
+                "",
+                regex=False
+            )
+            .str.replace(
+                ",",
+                "",
+                regex=False
+            )
+            .str.strip()
+        )
+
+        df["weight"] = pd.to_numeric(
+            df["weight"],
+            errors="coerce"
+        )
+
+        df = df[
+            df["weight"].notna()
+        ]
+
+        df = df[
+            df["weight"] > 0
+        ]
+
+        if df.empty:
+
+            print(
+                f"  [{etf_ticker}] "
+                f"CSV parsed but "
+                f"no positive-weight holdings"
+            )
+
+            return None
+
+        print(
+            f"  [{etf_ticker}] "
+            f"parsed {len(df)} raw holdings"
+        )
+
+        return _clean_and_dedup(
+            df[
+                [
+                    "ticker",
+                    "company",
+                    "weight",
+                ]
+            ].copy(),
+            etf_ticker
+        )
+
+    # ─────────────────────────────────────────────────────────
+    # ATTEMPT 1
+    # Direct latest-holdings.csv
+    # ─────────────────────────────────────────────────────────
+
+    print(
+        f"  [{etf_ticker}] "
+        f"trying direct latest-holdings.csv..."
+    )
 
     try:
 
-        warmup = session.get(
-            product_page,
+        resp = session.get(
+            latest_csv_url,
             headers={
-                "Accept": (
-                    "text/html,"
-                    "application/xhtml+xml,"
-                    "application/xml;q=0.9,"
-                    "*/*;q=0.8"
-                )
+                "Referer":
+                    product_page,
+
+                "Accept":
+                    "text/csv,"
+                    "text/plain,"
+                    "application/octet-stream,"
+                    "*/*",
             },
-            timeout=30
+            timeout=30,
+        )
+
+        content_type = (
+            resp.headers
+            .get(
+                "Content-Type",
+                ""
+            )
+            .lower()
         )
 
         print(
             f"  [{etf_ticker}] "
-            f"product page → "
-            f"HTTP {warmup.status_code}, "
-            f"{len(warmup.content)} bytes"
+            f"latest CSV → "
+            f"HTTP {resp.status_code}, "
+            f"content-type={content_type}, "
+            f"{len(resp.content)} bytes"
         )
+
+        if resp.status_code == 200:
+
+            result = parse_ishares_csv(
+                resp.text,
+                latest_csv_url
+            )
+
+            if (
+                result is not None
+                and not result.empty
+            ):
+
+                print(
+                    f"  [{etf_ticker}] "
+                    f"✓ direct latest CSV "
+                    f"worked"
+                )
+
+                return result
 
     except Exception as e:
 
         print(
             f"  [{etf_ticker}] "
-            f"product page warm-up failed: "
+            f"direct CSV request failed: "
             f"{e}"
         )
 
     # ─────────────────────────────────────────────────────────
-    # Date fallback
+    # ATTEMPT 2
+    # Legacy endpoint with dates
     # ─────────────────────────────────────────────────────────
+
+    print(
+        f"  [{etf_ticker}] "
+        f"trying legacy iShares endpoint..."
+    )
 
     for days_back in range(
         0,
@@ -1212,7 +1597,8 @@ def fetch_ishares(
 
         params = {
 
-            "fileType": "csv",
+            "fileType":
+                "csv",
 
             "fileName":
                 f"{etf_ticker}_holdings",
@@ -1229,7 +1615,7 @@ def fetch_ishares(
         try:
 
             resp = session.get(
-                endpoint,
+                legacy_endpoint,
                 params=params,
                 headers={
                     "Referer":
@@ -1243,8 +1629,6 @@ def fetch_ishares(
                 timeout=30,
             )
 
-            body = resp.text
-
             content_type = (
                 resp.headers
                 .get(
@@ -1254,26 +1638,20 @@ def fetch_ishares(
                 .lower()
             )
 
+            body = resp.text
+
             sample = (
                 body[:5000]
                 .lower()
             )
 
-            # ─────────────────────────────────────────────────
-            # Detect HTML masquerading as CSV
-            # ─────────────────────────────────────────────────
-
             looks_like_html = (
-
                 "<!doctype html"
                 in sample
-
                 or "<html"
                 in sample
-
                 or "<head"
                 in sample
-
             )
 
             if looks_like_html:
@@ -1282,210 +1660,26 @@ def fetch_ishares(
                     f"  [{etf_ticker}] "
                     f"{candidate.isoformat()} → "
                     f"HTTP {resp.status_code}, "
-                    f"content-type="
-                    f"{content_type}, "
-                    f"HTML response "
+                    f"HTML "
                     f"({len(resp.content)} bytes)"
                 )
 
-                # Only inspect the HTML once.
-                if days_back == 0:
-
-                    inspect_ishares_html(
-                        etf_ticker,
-                        body
-                    )
-
-                # HTML is not CSV.
                 continue
 
-            # ─────────────────────────────────────────────────
-            # Basic response validation
-            # ─────────────────────────────────────────────────
-
-            if (
-                resp.status_code != 200
-                or len(body) < 100
-            ):
-
-                snippet = (
-                    body[:200]
-                    .replace(
-                        "\n",
-                        " "
-                    )
-                )
+            if resp.status_code != 200:
 
                 print(
                     f"  [{etf_ticker}] "
                     f"{candidate.isoformat()} → "
                     f"HTTP "
-                    f"{resp.status_code}, "
-                    f"{len(body)} bytes: "
-                    f"{snippet!r}"
+                    f"{resp.status_code}"
                 )
 
                 continue
 
-            # ─────────────────────────────────────────────────
-            # Find ticker header
-            # ─────────────────────────────────────────────────
-
-            lines = body.splitlines()
-
-            header_idx = None
-
-            for idx, line in enumerate(
-                lines
-            ):
-
-                try:
-
-                    values = {
-                        v.strip().lower()
-                        for v in next(
-                            csv.reader(
-                                [line]
-                            )
-                        )
-                    }
-
-                except Exception:
-
-                    continue
-
-                if "ticker" in values:
-
-                    header_idx = idx
-                    break
-
-            if header_idx is None:
-
-                print(
-                    f"  [{etf_ticker}] "
-                    f"{candidate.isoformat()} → "
-                    f"CSV returned but "
-                    f"no ticker header found"
-                )
-
-                continue
-
-            # ─────────────────────────────────────────────────
-            # Parse CSV
-            # ─────────────────────────────────────────────────
-
-            df = pd.read_csv(
-                StringIO(body),
-                skiprows=header_idx,
-                dtype=str,
-                on_bad_lines="skip",
-                engine="python",
-            )
-
-            df.columns = [
-                str(c).strip()
-                for c in df.columns
-            ]
-
-            # ─────────────────────────────────────────────────
-            # Locate columns
-            # ─────────────────────────────────────────────────
-
-            ticker_col = next(
-                (
-                    c
-                    for c in df.columns
-                    if c.lower()
-                    == "ticker"
-                ),
-                None
-            )
-
-            name_col = next(
-                (
-                    c
-                    for c in df.columns
-                    if c.lower()
-                    in {
-                        "name",
-                        "security name",
-                    }
-                ),
-                None
-            )
-
-            weight_col = next(
-                (
-                    c
-                    for c in df.columns
-                    if c.lower()
-                    in {
-                        "weight (%)",
-                        "weight",
-                    }
-                ),
-                None
-            )
-
-            if not all(
-                [
-                    ticker_col,
-                    name_col,
-                    weight_col,
-                ]
-            ):
-
-                print(
-                    f"  [{etf_ticker}] "
-                    f"unexpected "
-                    f"iShares columns: "
-                    f"{list(df.columns)}"
-                )
-
-                continue
-
-            # ─────────────────────────────────────────────────
-            # Normalize
-            # ─────────────────────────────────────────────────
-
-            df = df[
-                [
-                    ticker_col,
-                    name_col,
-                    weight_col,
-                ]
-            ].copy()
-
-            df.columns = [
-                "ticker",
-                "company",
-                "weight",
-            ]
-
-            df["ticker"] = (
-                df["ticker"]
-                .astype(str)
-                .str.strip()
-            )
-
-            df = df[
-                ~df["ticker"]
-                .str.lower()
-                .isin(
-                    [
-                        "",
-                        "nan",
-                        "ticker",
-                        "cash",
-                        "usd",
-                        "total",
-                    ]
-                )
-            ]
-
-            result = _clean_and_dedup(
-                df,
-                etf_ticker
+            result = parse_ishares_csv(
+                body,
+                legacy_endpoint
             )
 
             if (
@@ -1495,7 +1689,8 @@ def fetch_ishares(
 
                 print(
                     f"  [{etf_ticker}] "
-                    f"iShares holdings date "
+                    f"✓ legacy endpoint "
+                    f"worked for "
                     f"{candidate.isoformat()}"
                 )
 
@@ -1505,7 +1700,7 @@ def fetch_ishares(
 
             print(
                 f"  [{etf_ticker}] "
-                f"iShares "
+                f"legacy "
                 f"{candidate.isoformat()} "
                 f"failed: {e}"
             )

@@ -492,10 +492,28 @@ def fetch_ishares(etf_ticker: str, product_id: str):
     from io import StringIO
     import csv
 
+    # NOTE: the real product page needs a name slug we don't have per
+    # ticker (e.g. /us/products/339081/ishares-ai-innovation-and-tech-active-etf),
+    # so we warm up against the products index instead — this is enough to
+    # pick up any domain-level session cookie Akamai sets, without needing
+    # to know or guess the exact slug.
+    product_page = "https://www.ishares.com/us/products/etf-product-list"
     endpoint = (
         f"https://www.ishares.com/us/products/{product_id}/"
         f"holdings/1467271812596.ajax"
     )
+
+    # Use a Session + warm-up GET of the human-facing product page first.
+    # iShares' edge (Akamai) will often reject the raw .ajax CSV request
+    # with a short 403/empty body if it doesn't see a prior session/cookie
+    # from the same client — this mimics a browser visiting the fund page
+    # before it downloads the holdings CSV.
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    try:
+        session.get(product_page, timeout=30)
+    except Exception as e:
+        print(f"  [{etf_ticker}] warm-up request failed: {e}")
 
     # Holdings may not be published for today on weekends/holidays.
     for days_back in range(0, 10):
@@ -508,17 +526,23 @@ def fetch_ishares(etf_ticker: str, product_id: str):
         }
 
         try:
-            resp = requests.get(
+            resp = session.get(
                 endpoint,
                 params=params,
                 headers={
-                    **HEADERS,
-                    "Referer": "https://www.ishares.com/",
+                    "Referer": product_page,
                     "Accept": "text/csv,text/plain,*/*",
                 },
                 timeout=30,
             )
             if resp.status_code != 200 or len(resp.text) < 100:
+                # DIAGNOSTIC: log what we actually got back so failures are
+                # debuggable from CI logs instead of a silent skip.
+                snippet = resp.text[:200].replace("\n", " ") if resp.text else ""
+                print(
+                    f"  [{etf_ticker}] {candidate.isoformat()} → "
+                    f"HTTP {resp.status_code}, {len(resp.text)} bytes: {snippet!r}"
+                )
                 continue
 
             # Find the header row (the one containing "ticker") using

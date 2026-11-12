@@ -1,287 +1,3 @@
-# import requests
-# import pandas as pd
-# from datetime import date, timedelta
-# from supabase import create_client
-# import os
-# import time
-
-# # ── Supabase client ───────────────────────────────────────────────────────────
-# SUPABASE_URL = os.environ["SUPABASE_URL"]
-# SUPABASE_KEY = os.environ["SUPABASE_KEY"]
-# supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# # ── Constants ─────────────────────────────────────────────────────────────────
-# TODAY     = date.today().isoformat()
-# YESTERDAY = (date.today() - timedelta(days=1)).isoformat()
-# HEADERS   = {"User-Agent": "Mozilla/5.0 (compatible; AlphaRadar/1.0)"}
-
-# # ── ARK ETFs ──────────────────────────────────────────────────────────────────
-# # CSV: no header row, 8 fixed columns
-# # date | fund | company | ticker | cusip | shares | market_value | weight
-# ARK_BASE = "https://assets.ark-funds.com/fund-documents/funds-etf-csv"
-# ARK_COLS  = ["date", "fund", "company", "ticker", "cusip", "shares", "market_value", "weight"]
-
-# ARK_ETFS = {
-#     "ARKK": f"{ARK_BASE}/ARK_INNOVATION_ETF_ARKK_HOLDINGS.csv",
-#     "ARKW": f"{ARK_BASE}/ARK_NEXT_GENERATION_INTERNET_ETF_ARKW_HOLDINGS.csv",
-#     "ARKG": f"{ARK_BASE}/ARK_GENOMIC_REVOLUTION_ETF_ARKG_HOLDINGS.csv",
-#     "ARKF": f"{ARK_BASE}/ARK_FINTECH_INNOVATION_ETF_ARKF_HOLDINGS.csv",
-#     "ARKX": f"{ARK_BASE}/ARK_SPACE_EXPLORATION_&_INNOVATION_ETF_ARKX_HOLDINGS.csv",
-#     "PRNT": f"{ARK_BASE}/THE_3D_PRINTING_ETF_PRNT_HOLDINGS.csv",
-#     "IZRL": f"{ARK_BASE}/ARK_ISRAEL_INNOVATIVE_TECHNOLOGY_ETF_IZRL_HOLDINGS.csv",
-# }
-
-# # ARKQ — ARK CDN accepts literal & in filenames (confirmed from ARKX URL pattern)
-# ARKQ_URLS = [
-#     f"{ARK_BASE}/ARK_AUTONOMOUS_TECH._%26_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
-#     f"{ARK_BASE}/ARK_AUTONOMOUS_TECHNOLOGY_&_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
-#     f"{ARK_BASE}/ARK_AUTONOMOUS_TECHNOLOGY_%26_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
-#     f"{ARK_BASE}/ARK_AUTONOMOUS_TECH_%26_ROBOTICS_ETF_ARKQ_HOLDINGS.csv",
-#     f"{ARK_BASE}/ARKQ_HOLDINGS.csv",
-# ]
-
-# # ── Tema ETFs ─────────────────────────────────────────────────────────────────
-# # Official CSV URL confirmed from temaetfs.com/nasa page source
-# TEMA_ETFS = {
-#     "NASA": "https://temaetfs.com/hubfs/Website/Holdings/NASA-holdings.csv",
-# }
-
-
-# # ─────────────────────────────────────────────────────────────────────────────
-# # SHARED HELPERS
-# # ─────────────────────────────────────────────────────────────────────────────
-
-# def _clean_and_dedup(df, etf_ticker):
-#     """Clean weight column, tag etf/date, deduplicate on (etf, ticker, date)."""
-#     df["weight"] = (
-#         df["weight"].astype(str)
-#         .str.replace("%", "", regex=False)
-#         .str.replace(",", "", regex=False)
-#         .str.strip()
-#     )
-#     df["weight"]  = pd.to_numeric(df["weight"], errors="coerce").fillna(0.0)
-#     df["ticker"]  = df["ticker"].astype(str).str.strip().str.upper()
-#     df["company"] = df["company"].astype(str).str.strip()
-#     df["etf"]     = etf_ticker
-#     df["date"]    = TODAY
-
-#     result = df[["etf", "ticker", "company", "weight", "date"]]
-#     result = result[~result["ticker"].isin(["NAN", "", "-", "TICKER"])]
-#     result = result[result["weight"] > 0]
-
-#     before = len(result)
-#     result = (result
-#               .sort_values("weight", ascending=False)
-#               .drop_duplicates(subset=["etf", "ticker", "date"], keep="first"))
-#     if len(result) < before:
-#         print(f"  [{etf_ticker}] removed {before - len(result)} duplicate rows")
-
-#     print(f"  [{etf_ticker}] {len(result)} holdings — top: {result['ticker'].head(3).tolist()}")
-#     return result
-
-
-# def save_etf(ticker: str, df) -> bool:
-#     if df is None or df.empty:
-#         return False
-#     records = df.to_dict("records")
-#     for i in range(0, len(records), 100):
-#         supabase.table("holdings").upsert(records[i:i+100]).execute()
-#     changes = detect_changes(ticker, df)
-#     if changes:
-#         supabase.table("holding_changes").insert(changes).execute()
-#     print(f"  ✓ saved, {len(changes)} changes detected")
-#     return True
-
-
-# # ─────────────────────────────────────────────────────────────────────────────
-# # FETCH FUNCTIONS
-# # ─────────────────────────────────────────────────────────────────────────────
-
-# def fetch_ark(etf_ticker: str, url: str):
-#     """ARK CSV: no header row, fixed 8-column format."""
-#     try:
-#         resp = requests.get(url, headers=HEADERS, timeout=30)
-#         resp.raise_for_status()
-#         from io import StringIO
-#         df = pd.read_csv(StringIO(resp.text), header=None, names=ARK_COLS)
-#         df = df[df["ticker"].notna()]
-#         df = df[~df["ticker"].astype(str).str.lower().isin(["ticker", "nan", ""])]
-#         return _clean_and_dedup(df[["ticker", "company", "weight"]].copy(), etf_ticker)
-#     except Exception as e:
-#         print(f"  [{etf_ticker}] ✗ {e}")
-#         return None
-
-
-# def fetch_ark_with_fallback(etf_ticker: str, urls: list):
-#     """Try multiple URL variants; use first that returns HTTP 200."""
-#     for i, url in enumerate(urls):
-#         try:
-#             resp = requests.get(url, headers=HEADERS, timeout=30)
-#             if resp.status_code == 200:
-#                 print(f"  [{etf_ticker}] variant {i+1} OK")
-#                 from io import StringIO
-#                 df = pd.read_csv(StringIO(resp.text), header=None, names=ARK_COLS)
-#                 df = df[df["ticker"].notna()]
-#                 df = df[~df["ticker"].astype(str).str.lower().isin(["ticker", "nan", ""])]
-#                 return _clean_and_dedup(df[["ticker", "company", "weight"]].copy(), etf_ticker)
-#             else:
-#                 print(f"  [{etf_ticker}] variant {i+1} → HTTP {resp.status_code}")
-#         except Exception as e:
-#             print(f"  [{etf_ticker}] variant {i+1} ✗ {e}")
-#     print(f"  [{etf_ticker}] all variants failed — skipping")
-#     return None
-
-
-# def fetch_tema(etf_ticker: str, url: str):
-#     """
-#     Tema CSV columns (confirmed from NASA live response):
-#     holdings_date, ticker, cusip, proper_name, shares,
-#     market_value, percent_of_nav, is_cash, country, sector
-#     """
-#     try:
-#         resp = requests.get(url, headers=HEADERS, timeout=30)
-#         resp.raise_for_status()
-#         from io import StringIO
-
-#         df = pd.read_csv(StringIO(resp.text))
-#         df.columns = [c.strip().lower() for c in df.columns]
-
-#         # Use confirmed column names; fall back to dynamic detection
-#         ticker_col = next((c for c in df.columns if c == "ticker" or "ticker" in c), None)
-#         name_col   = next((c for c in df.columns if c == "proper_name" or "name" in c or "company" in c), None)
-#         weight_col = next((c for c in df.columns if c == "percent_of_nav" or "weight" in c or "percent" in c or "nav" in c), None)
-
-#         if not all([ticker_col, name_col, weight_col]):
-#             print(f"  [{etf_ticker}] ✗ unexpected columns: {list(df.columns)}")
-#             return None
-
-#         df = df[[ticker_col, name_col, weight_col]].copy()
-#         df.columns = ["ticker", "company", "weight"]
-#         df = df.dropna(subset=["ticker"])
-
-#         # Filter out cash rows using is_cash column if available (already dropped above, use weight filter)
-#         df = df[~df["ticker"].astype(str).str.strip().str.lower().isin(
-#             ["ticker", "nan", "", "-", "cash", "usd"])]
-#         return _clean_and_dedup(df, etf_ticker)
-#     except Exception as e:
-#         print(f"  [{etf_ticker}] ✗ {e}")
-#         return None
-
-
-# # ─────────────────────────────────────────────────────────────────────────────
-# # CHANGE DETECTION
-# # ─────────────────────────────────────────────────────────────────────────────
-
-# def detect_changes(etf: str, today_df) -> list:
-#     result = supabase.table("holdings") \
-#         .select("ticker, weight") \
-#         .eq("etf", etf) \
-#         .eq("date", YESTERDAY) \
-#         .execute()
-#     yesterday_map = {r["ticker"]: float(r["weight"]) for r in (result.data or [])}
-
-#     if not yesterday_map:
-#         print(f"  [{etf}] no yesterday data — first run for this ETF")
-#         return []
-
-#     today_map = dict(zip(today_df["ticker"], today_df["weight"].astype(float)))
-#     changes = []
-
-#     for tkr, weight in today_map.items():
-#         if tkr not in yesterday_map:
-#             changes.append({
-#                 "etf": etf, "ticker": tkr, "change_type": "new_position",
-#                 "delta": round(weight, 4),
-#                 "description": f"{etf} opened new position in {tkr}"
-#             })
-#         else:
-#             delta = weight - yesterday_map[tkr]
-#             if abs(delta) > 0.3:
-#                 verb = "increased" if delta > 0 else "reduced"
-#                 changes.append({
-#                     "etf": etf, "ticker": tkr,
-#                     "change_type": "accumulation" if delta > 0 else "reduction",
-#                     "delta": round(delta, 4),
-#                     "description": f"{etf} {verb} {tkr} by {abs(round(delta, 2))}%"
-#                 })
-
-#     for tkr in yesterday_map:
-#         if tkr not in today_map:
-#             changes.append({
-#                 "etf": etf, "ticker": tkr, "change_type": "removed",
-#                 "delta": 0.0, "description": f"{etf} removed {tkr} from portfolio"
-#             })
-
-#     return changes
-
-
-# def generate_multi_etf_signals():
-#     result = supabase.table("holding_changes") \
-#         .select("ticker, etf, change_type") \
-#         .eq("change_type", "accumulation") \
-#         .gte("created_at", TODAY) \
-#         .execute()
-
-#     from collections import defaultdict
-#     ticker_etfs: dict = defaultdict(list)
-#     for row in (result.data or []):
-#         ticker_etfs[row["ticker"]].append(row["etf"])
-
-#     signals = [
-#         {
-#             "etf": "MULTI", "ticker": tkr,
-#             "change_type": "multi_etf_buy",
-#             "delta": float(len(etfs)),
-#             "description": f"{len(etfs)} ETFs simultaneously buying {tkr}: {', '.join(etfs)}"
-#         }
-#         for tkr, etfs in ticker_etfs.items() if len(etfs) >= 3
-#     ]
-
-#     if signals:
-#         supabase.table("holding_changes").insert(signals).execute()
-#         print(f"  ✓ {len(signals)} multi-ETF signals")
-#     else:
-#         print("  No multi-ETF signals today")
-
-
-# # ─────────────────────────────────────────────────────────────────────────────
-# # MAIN
-# # ─────────────────────────────────────────────────────────────────────────────
-
-# def run():
-#     print(f"AlphaRadar ETL — {TODAY}")
-#     print("=" * 55)
-#     success = 0
-
-#     # ── ARK core ─────────────────────────────────────────
-#     for ticker, url in ARK_ETFS.items():
-#         print(f"\nFetching {ticker} (ARK)...")
-#         if save_etf(ticker, fetch_ark(ticker, url)):
-#             success += 1
-#         time.sleep(1)
-
-#     # ── ARKQ fallback ─────────────────────────────────────
-#     print(f"\nFetching ARKQ (ARK, multi-URL fallback)...")
-#     if save_etf("ARKQ", fetch_ark_with_fallback("ARKQ", ARKQ_URLS)):
-#         success += 1
-#     time.sleep(1)
-
-#     # ── Tema ──────────────────────────────────────────────
-#     for ticker, url in TEMA_ETFS.items():
-#         print(f"\nFetching {ticker} (Tema)...")
-#         if save_etf(ticker, fetch_tema(ticker, url)):
-#             success += 1
-#         time.sleep(1)
-
-#     total = len(ARK_ETFS) + 1 + len(TEMA_ETFS)
-#     print(f"\nGenerating cross-ETF signals...")
-#     generate_multi_etf_signals()
-#     print(f"\n{'='*55}")
-#     print(f"Done: {success}/{total} ETFs updated")
-
-
-# if __name__ == "__main__":
-#     run()
 import requests
 import pandas as pd
 from datetime import date, timedelta
@@ -1980,6 +1696,179 @@ def generate_multi_etf_signals():
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ── Additional actively managed ETFs (2026-11) ────────────────────────────────
+# Capital Group: documented daily XLSX endpoint; Avantis: discover official CSV.
+# JPMorgan: discovery-only until official daily-download endpoint is verified.
+ADDITIONAL_ETFS = {
+    "CGGR": "capital", "CGDV": "capital",
+    "AVUV": "avantis", "AVLV": "avantis",
+    "JGRO": "jpmorgan", "JAVA": "jpmorgan",
+}
+AVANTIS_SLUGS = {
+    "AVUV": "avantis-us-small-cap-value-etf",
+    "AVLV": "avantis-us-large-cap-value-etf",
+}
+
+
+def _new_number(series):
+    return pd.to_numeric(series.astype(str).str.replace(r"[$,%]", "", regex=True)
+                         .str.replace(",", "", regex=False).str.strip(), errors="coerce")
+
+
+def _normalize_extra_holdings(raw, etf, source_date=None):
+    """Convert issuer data to existing Supabase schema without inventing data."""
+    if raw is None or raw.empty:
+        return None
+    df = raw.copy()
+    df.columns = [str(c).strip().lower().replace("\n", " ") for c in df.columns]
+    aliases = {
+        "ticker": ["ticker", "symbol", "security ticker"],
+        "company": ["security name", "company", "name", "holding", "description"],
+        "weight": ["percent of net assets", "weight", "weight (%)", "portfolio weight", "percent of assets"],
+    }
+    mapping = {}
+    for target, options in aliases.items():
+        for option in options:
+            if option in df.columns:
+                mapping[target] = option
+                break
+    if len(mapping) != 3:
+        raise ValueError(f"{etf}: required columns missing; received {list(df.columns)}")
+    df = df[[mapping[x] for x in ("ticker", "company", "weight")]].copy()
+    df.columns = ["ticker", "company", "weight"]
+    df["ticker"] = df["ticker"].astype(str).str.upper().str.strip()
+    df["company"] = df["company"].astype(str).str.strip()
+    df["weight"] = _new_number(df["weight"])
+    df = df[df["ticker"].str.fullmatch(r"[A-Z][A-Z0-9.\-]{0,14}", na=False)]
+    df = df[~df["ticker"].isin(["CASH", "USD", "TOTAL", "NAN"])]
+    df = df[df["weight"].notna() & (df["weight"] > 0)]
+    df = df.drop_duplicates(subset=["ticker"], keep="first")
+    if len(df) < 5 or df["weight"].sum() > 125:
+        raise ValueError(f"{etf}: suspicious holdings: {len(df)} rows, weight sum {df['weight'].sum():.2f}")
+    df["etf"] = etf
+    df["date"] = source_date or TODAY
+    return df[["etf", "ticker", "company", "weight", "date"]]
+
+
+def fetch_capital(etf):
+    """Official Capital Group XLSX daily holdings endpoint (verify response each run)."""
+    from io import BytesIO
+    url = ("https://www.capitalgroup.com/api/investments/"
+           f"investment-service/v1/etfs/{etf}/download/daily-holdings?audience=advisor")
+    r = requests.get(url, headers=HEADERS, timeout=35)
+    r.raise_for_status()
+    if not r.content.startswith(b"PK"):
+        raise ValueError(f"{etf}: expected XLSX, got {r.headers.get('Content-Type')}")
+    sheets = pd.read_excel(BytesIO(r.content), sheet_name=None, header=None)
+    for sheet in sheets.values():
+        for idx in range(min(len(sheet), 30)):
+            headers = [str(v).strip().lower() for v in sheet.iloc[idx].tolist()]
+            if "ticker" in headers and ("percent of net assets" in headers or "weight" in headers):
+                body = sheet.iloc[idx+1:].copy()
+                body.columns = sheet.iloc[idx].tolist()
+                try:
+                    return _normalize_extra_holdings(body, etf)
+                except ValueError:
+                    continue
+    raise ValueError(f"{etf}: no valid holdings table found in XLSX")
+
+
+def fetch_avantis(etf):
+    """Find an issuer-hosted full holdings CSV from the official fund page."""
+    from urllib.parse import urljoin, urlparse
+    from io import BytesIO
+    from bs4 import BeautifulSoup
+    slug = AVANTIS_SLUGS[etf]
+    page = f"https://www.avantisinvestors.com/avantis-investments/en-us/{slug}/{etf}/"
+    r = requests.get(page, headers=HEADERS, timeout=30)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    candidates = []
+    for a in soup.find_all("a", href=True):
+        href = urljoin(page, a["href"])
+        label = a.get_text(" ", strip=True).lower()
+        if ("csv" in href.lower() or "download" in href.lower()) and ("holding" in (href + label).lower()):
+            if urlparse(href).hostname and urlparse(href).hostname.endswith("avantisinvestors.com"):
+                candidates.append(href)
+    for url in dict.fromkeys(candidates):
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=30)
+            response.raise_for_status()
+            if response.content[:2] == b"PK":
+                raw = pd.read_excel(BytesIO(response.content))
+            elif b"<html" not in response.content[:500].lower():
+                from io import StringIO
+                raw = pd.read_csv(StringIO(response.content.decode("utf-8-sig")), on_bad_lines="skip")
+            else:
+                continue
+            return _normalize_extra_holdings(raw, etf)
+        except Exception as exc:
+            print(f"  [{etf}] candidate rejected: {exc}")
+    raise RuntimeError(f"{etf}: no verified full holdings CSV/XLSX link found on official page")
+
+
+def fetch_jpmorgan(etf):
+    """Fail closed until a validated official JPMorgan daily holdings feed is configured."""
+    import os
+    from io import BytesIO, StringIO
+    url = os.getenv(f"ALPHARADAR_{etf}_HOLDINGS_URL", "")
+    if not url or not url.startswith("https://"):
+        raise RuntimeError(f"{etf}: set ALPHARADAR_{etf}_HOLDINGS_URL to a VERIFIED official holdings download URL")
+    from urllib.parse import urlparse
+    host = urlparse(url).hostname or ""
+    if not (host == "jpmorgan.com" or host.endswith(".jpmorgan.com") or
+            host == "jpmorganfunds.com" or host.endswith(".jpmorganfunds.com")):
+        raise ValueError(f"{etf}: URL must be hosted by JPMorgan")
+    r = requests.get(url, headers=HEADERS, timeout=35)
+    r.raise_for_status()
+    if r.content[:2] == b"PK":
+        raw = pd.read_excel(BytesIO(r.content))
+    elif b"<html" not in r.content[:500].lower():
+        raw = pd.read_csv(StringIO(r.content.decode("utf-8-sig")), on_bad_lines="skip")
+    else:
+        raise ValueError(f"{etf}: HTML received instead of holdings file")
+    return _normalize_extra_holdings(raw, etf)
+
+
+def fetch_additional(etf, issuer):
+    try:
+        return {"capital": fetch_capital, "avantis": fetch_avantis,
+                "jpmorgan": fetch_jpmorgan}[issuer](etf)
+    except Exception as exc:
+        print(f"  [{etf}] SKIPPED: {exc}")
+        return None
+
+
+def detect_changes(etf: str, today_df) -> list:
+    """Compare to latest earlier available snapshot, not calendar yesterday."""
+    latest = (supabase.table("holdings").select("date").eq("etf", etf)
+              .lt("date", str(today_df["date"].iloc[0]))
+              .order("date", desc=True).limit(1).execute())
+    if not latest.data:
+        print(f"  [{etf}] first snapshot; no changes")
+        return []
+    prev_date = latest.data[0]["date"]
+    prior = (supabase.table("holdings").select("ticker,weight")
+             .eq("etf", etf).eq("date", prev_date).execute())
+    old = {r["ticker"]: float(r["weight"]) for r in (prior.data or [])}
+    new = dict(zip(today_df["ticker"], today_df["weight"].astype(float)))
+    out = []
+    for ticker, weight in new.items():
+        if ticker not in old:
+            out.append({"etf": etf, "ticker": ticker, "change_type": "new_position",
+                        "delta": round(weight, 4), "description": f"{etf} added {ticker} to reported holdings"})
+        elif abs(weight - old[ticker]) > 0.3:
+            delta = round(weight - old[ticker], 4)
+            out.append({"etf": etf, "ticker": ticker,
+                        "change_type": "accumulation" if delta > 0 else "reduction",
+                        "delta": delta,
+                        "description": f"{etf} {ticker} portfolio weight changed {delta:+.2f} percentage points (not verified trades)"})
+    for ticker in old.keys() - new.keys():
+        out.append({"etf": etf, "ticker": ticker, "change_type": "removed",
+                    "delta": 0.0, "description": f"{etf} no longer reports {ticker}"})
+    return out
+
+
 def run():
 
     print(
@@ -2092,6 +1981,14 @@ def run():
 
         time.sleep(1)
 
+    # ── New issuer adapters ───────────────────────────────────────
+    for ticker, issuer in ADDITIONAL_ETFS.items():
+        print(f"\nFetching {ticker} ({issuer})...")
+        df = fetch_additional(ticker, issuer)
+        if df is not None and save_etf(ticker, df):
+            success += 1
+        time.sleep(1)
+
     # ─────────────────────────────────────────────────────────
     # Signals
     # ─────────────────────────────────────────────────────────
@@ -2101,6 +1998,7 @@ def run():
         + 1
         + len(TEMA_ETFS)
         + len(ISHARES_ETFS)
+        + len(ADDITIONAL_ETFS)
     )
 
     print(

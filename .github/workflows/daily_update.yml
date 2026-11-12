@@ -64,6 +64,10 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          ALPHARADAR_JGRO_HOLDINGS_URL: ${{ secrets.ALPHARADAR_JGRO_HOLDINGS_URL }}
+          ALPHARADAR_JAVA_HOLDINGS_URL: ${{ secrets.ALPHARADAR_JAVA_HOLDINGS_URL }}
+          ALPHARADAR_AVUV_HOLDINGS_URL: ${{ secrets.ALPHARADAR_AVUV_HOLDINGS_URL }}
+          ALPHARADAR_AVLV_HOLDINGS_URL: ${{ secrets.ALPHARADAR_AVLV_HOLDINGS_URL }}
 
       - name: Notify on failure
         if: failure()

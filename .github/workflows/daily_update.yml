@@ -37,9 +37,9 @@ name: Daily ETF Update
 
 on:
   schedule:
-    # UTC 23:00 weekdays = US Eastern 7pm (after ARK publishes holdings)
-    - cron: '0 23 * * 1-5'
-  workflow_dispatch:   # allow manual trigger from GitHub UI
+    - cron: '0 15 * * 1-5'   # 美东上午 10~11 点，发行商应已发布前一日持仓
+    - cron: '0 23 * * 1-5'   # 美东下午 6~7 点，ARK 收盘后更新
+  workflow_dispatch:
 
 jobs:
   update:

@@ -1324,7 +1324,21 @@ def _normalize_extra_holdings(raw, etf, source_date=None):
                     "name", "holding", "description"],
         "weight": ["percent of net assets", "% of net assets", "% of assets",
                    "weight", "weight (%)", "portfolio weight", "percent of assets"],
-        "shares": ["shares", "shares/par", "shares / par", "par shares", "quantity", "number of shares", "shares held", "units", "units held","market value shares"],
+        "shares": [
+    "shares",
+    "shares or principal amount",
+    "shares/principal amount",
+    "shares / principal amount",
+    "shares/par",
+    "shares / par",
+    "par shares",
+    "quantity",
+    "number of shares",
+    "shares held",
+    "units",
+    "units held",
+    "market value shares"
+],
     }
 
     mapping = {}

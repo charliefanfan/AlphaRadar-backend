@@ -36,7 +36,10 @@
 name: Daily ETF Update
 
 on:
-  workflow_dispatch:  # Temporarily pause scheduled ETL during weight migration
+  schedule:
+    - cron: '0 15 * * 1-5'   # US Eastern 10am EST / 11am EDT
+    - cron: '0 23 * * 1-5'   # US Eastern 6pm EST / 7pm EDT
+  workflow_dispatch:
 
 jobs:
   update:

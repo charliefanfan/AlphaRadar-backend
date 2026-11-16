@@ -1229,6 +1229,24 @@ def _clean_shares(series):
     return pd.to_numeric(cleaned, errors="coerce")
 
 
+def _normalize_weight_scale(df, etf):
+    """Normalize known 0-1 issuer weights to 0-100 percentage units."""
+    if etf not in {"CGDV", "CGGR", "NASA"}:
+        return df
+    df = df.copy()
+    values = pd.to_numeric(df["weight"], errors="coerce")
+    total = float(values[values.notna() & (values > 0)].sum())
+    if 0.70 <= total <= 1.30:
+        df["weight"] = values * 100.0
+        print(f"  [{etf}] normalized fractional weight sum {total:.5f} to percent")
+    elif 70.0 <= total <= 130.0:
+        df["weight"] = values
+        print(f"  [{etf}] weights already in percent")
+    else:
+        raise ValueError(f"{etf}: unsafe weight scale, total={total:.6f}")
+    return df
+
+
 def _clean_and_dedup(df, etf_ticker, as_of=None):
     """Normalize common issuer rows while preserving reported shares."""
     df = df.copy()
@@ -1377,6 +1395,8 @@ def _normalize_extra_holdings(raw, etf, source_date=None):
     df = df[df["weight"].notna() & (df["weight"] > 0)]
     df = df.sort_values("weight", ascending=False)
     df = df.drop_duplicates(subset=["ticker"], keep="first")
+
+    df = _normalize_weight_scale(df, etf)
 
     if len(df) < 5 or df["weight"].sum() > 125:
         raise ValueError(
@@ -1749,7 +1769,7 @@ def fetch_tema(etf_ticker: str, url: str):
             .isin(["ticker", "nan", "", "-", "cash", "usd"])
         ]
 
-        return _clean_and_dedup(df, etf_ticker, as_of)
+        return _normalize_weight_scale(_clean_and_dedup(df, etf_ticker, as_of), etf_ticker)
 
     except Exception as e:
         print(f"  [{etf_ticker}] ✗ {e}")

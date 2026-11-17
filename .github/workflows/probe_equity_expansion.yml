@@ -1,0 +1,32 @@
+name: Probe 20 active ETF candidates (read only)
+on:
+  push:
+    branches: [feat/probe-20-active-etfs]
+    paths:
+      - scripts/probe_equity_expansion.py
+      - tests/test_equity_expansion.py
+      - .github/workflows/probe_equity_expansion.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install isolated probe dependencies
+        run: pip install pandas==2.2.2 requests==2.32.3 openpyxl==3.1.5 beautifulsoup4==4.12.3 json5==0.9.28
+      - name: Test validation and isolation
+        run: python -m unittest discover -s tests -p test_equity_expansion.py -v
+      - name: Probe official sources without database access
+        run: python scripts/probe_equity_expansion.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: active-etf-expansion-readonly
+          path: artifacts/equity-expansion/
+          retention-days: 7

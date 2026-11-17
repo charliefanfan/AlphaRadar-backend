@@ -1,0 +1,52 @@
+name: Validate eleven equity ETF integration
+on:
+  push:
+    branches: [feat/enable-eleven-equity-etfs]
+    paths:
+      - scripts/equity_expansion_adapter.py
+      - scripts/fetch_holdings.py
+      - tests/test_equity_expansion_adapter.py
+      - tests/test_equity_expansion_integration.py
+      - requirements.txt
+      - .github/workflows/validate_eleven_equities.yml
+  pull_request:
+    paths:
+      - scripts/equity_expansion_adapter.py
+      - scripts/fetch_holdings.py
+      - tests/test_equity_expansion_adapter.py
+      - tests/test_equity_expansion_integration.py
+      - requirements.txt
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -p 'test_equity_expansion*.py' -v
+      - name: Validate all eleven official sources without database access
+        run: |
+          PYTHONPATH=scripts python - <<'PY'
+          from pathlib import Path
+          from equity_expansion_adapter import APPROVED_ETFS, fetch_equity_expansion
+          out = Path("artifacts/eleven-equities")
+          out.mkdir(parents=True, exist_ok=True)
+          for ticker in APPROVED_ETFS:
+              df = fetch_equity_expansion(ticker)
+              assert not df.empty and df["shares"].notna().all()
+              assert df["ticker"].is_unique
+              df.to_json(out / (ticker + ".json"), orient="records", indent=2)
+              print(ticker, len(df), df.iloc[0]["date"], round(df["weight"].sum(), 6))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eleven-equity-validated-snapshots
+          path: artifacts/eleven-equities/
+          retention-days: 7

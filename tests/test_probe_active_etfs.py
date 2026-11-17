@@ -59,6 +59,20 @@ class ProbeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             probe.normalize(frame, 'CGUS', TODAY)
 
+    def test_capital_accounting_cash_rows_are_not_stocks(self):
+        frame = fixture(fractional=True)
+        frame.loc[len(frame)] = ['', 'NET OTHER ASSETS', 0.0008, '-']
+        frame.loc[len(frame)] = ['', 'US DOLLAR', 0.0001, '-']
+        rows = probe.normalize(frame, 'CGGO', TODAY)
+        self.assertEqual(len(rows), 8)
+        self.assertFalse(any(r['company'] in {'NET OTHER ASSETS', 'US DOLLAR'} for r in rows))
+
+    def test_unknown_material_tickerless_security_still_blocked(self):
+        frame = fixture(fractional=True)
+        frame.loc[len(frame)] = ['', 'UNKNOWN SECURITY', 0.1, 100]
+        with self.assertRaises(ValueError):
+            probe.normalize(frame, 'CGGO', TODAY)
+
     def test_no_official_domain_lookalikes(self):
         self.assertTrue(probe.allowed('https://am.jpmorgan.com/file.csv', 'jpmorgan.com'))
         self.assertFalse(probe.allowed('https://jpmorgan.com.example.net/file.csv', 'jpmorgan.com'))

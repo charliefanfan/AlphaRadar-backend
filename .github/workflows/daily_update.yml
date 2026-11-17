@@ -24,8 +24,7 @@
 #       - name: Install dependencies
 #         run: pip install -r requirements.txt
 
-#       # CGUS and CGGO run through the same fetch entrypoint and schedule.
-      - name: Run ETF fetch
+#       - name: Run ETF fetch
 #         run: python scripts/fetch_holdings.py
 #         env:
 #           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -60,6 +59,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Includes CGUS and CGGO via scripts/fetch_holdings.py.
       - name: Run ETF fetch
         run: python scripts/fetch_holdings.py
         env:

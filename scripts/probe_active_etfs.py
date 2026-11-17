@@ -107,6 +107,10 @@ def normalize(frame, ticker, today, context_date=None):
             if weight == 0:
                 continue
             if not symbol or symbol in {'NAN', '-', '--'}:
+                # These exact Capital Group ledger rows are not securities and
+                # have no tradable ticker. Do not manufacture stock identities.
+                if ticker in {'CGUS', 'CGGO'} and company.upper() in {'NET OTHER ASSETS', 'US DOLLAR'}:
+                    continue
                 missing_ticker_weight += abs(weight)
                 missing_ticker_examples.append({'name': company, 'weight': weight})
                 continue
@@ -227,6 +231,17 @@ def fetch(ticker, session, today, capture=None):
     hints = [a['href'] for a in soup.find_all('a', href=True)
              if any(w in a['href'].lower() for w in ('holding', 'download', '.csv', '.xlsx'))]
     scripts = [a.get('src') for a in soup.find_all('script', src=True)][:8]
+    if ticker == 'DIVO':
+        asset_url = 'https://amplifyetfs.com/wp-content/uploads/ac_assets/Goodwood_DataTables/dataLoader.js'
+        try:
+            asset = get(session, asset_url, domain)
+            if capture:
+                (capture / 'DIVO.loader.js').write_text(asset.text)
+            snippets = [asset.text[max(0, m.start() - 100):m.end() + 180]
+                        for m in re.finditer(r'holdings|\.csv|\.xlsx|ajax', asset.text, re.I)][:8]
+            print(json.dumps({'etf': ticker, 'issuer_script_hints': snippets}), flush=True)
+        except requests.RequestException:
+            pass
     raise ValueError(f'No validated full holdings table. Link hints: {hints[:10]}; scripts: {scripts}')
 
 

@@ -1,0 +1,38 @@
+name: Validate Capital equity adapter
+on:
+  push:
+    branches: [feat/schedule-cgus-cggo]
+  pull_request:
+    paths:
+      - scripts/capital_equity_adapter.py
+      - scripts/fetch_holdings.py
+      - tests/test_capital_equity_adapter.py
+      - .github/workflows/validate_capital_equities.yml
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -p test_capital_equity_adapter.py -v
+      - name: Validate official CGUS and CGGO downloads without database access
+        run: |
+          PYTHONPATH=scripts python - <<'PY'
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          import requests
+          from capital_equity_adapter import parse_capital_holdings
+          today = datetime.now(ZoneInfo("America/New_York")).date()
+          for ticker in ("CGUS", "CGGO"):
+              url = f"https://www.capitalgroup.com/api/investments/investment-service/v1/etfs/{ticker}/download/daily-holdings?audience=advisor"
+              response = requests.get(url, timeout=35, headers={"User-Agent": "Mozilla/5.0"})
+              response.raise_for_status()
+              rows = parse_capital_holdings(response.content, ticker, today)
+              print(ticker, len(rows), rows[0]["date"], round(sum(r["weight"] for r in rows), 4))
+          PY

@@ -59,6 +59,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Includes CGUS and CGGO via scripts/fetch_holdings.py.
       - name: Run ETF fetch
         run: python scripts/fetch_holdings.py
         env:

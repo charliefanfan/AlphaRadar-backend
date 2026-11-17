@@ -1148,6 +1148,8 @@ ISHARES_ETFS = {
 # ── Additional actively managed ETFs ──────────────────────────────────────────
 
 ADDITIONAL_ETFS = {
+    "CGUS": "capital",
+    "CGGO": "capital",
     "CGGR": "capital",
     "CGDV": "capital",
     "JGRO": "jpmorgan",
@@ -2043,6 +2045,10 @@ def fetch_capital(etf):
             f"{etf}: expected XLSX, got {r.headers.get('Content-Type')}"
         )
 
+    if etf in {"CGUS", "CGGO"}:
+        from capital_equity_adapter import parse_capital_holdings
+        return pd.DataFrame(parse_capital_holdings(r.content, etf))
+
     sheets = pd.read_excel(BytesIO(r.content), sheet_name=None, header=None)
 
     for sheet in sheets.values():
@@ -2252,7 +2258,15 @@ def run():
     for ticker, issuer in ADDITIONAL_ETFS.items():
         print(f"\nFetching {ticker} ({issuer})...")
         df = fetch_additional(ticker, issuer)
-        results[ticker] = save_etf(ticker, df) if df is not None else "skipped"
+        if ticker in {"CGUS", "CGGO"}:
+            try:
+                results[ticker] = save_etf(ticker, df) if df is not None else "skipped"
+            except Exception as exc:
+                print(f"  [{ticker}] FAILED: {exc}")
+                results[ticker] = "failed"
+        else:
+            results[ticker] = save_etf(ticker, df) if df is not None else "skipped"
+
         time.sleep(1)
 
     print("\nGenerating cross-ETF signals...")

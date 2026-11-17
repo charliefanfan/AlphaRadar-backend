@@ -2269,6 +2269,17 @@ def run():
 
         time.sleep(1)
 
+    # Independently validated new funds; failures never stop existing ETF processing.
+    from equity_expansion_adapter import APPROVED_ETFS, fetch_equity_expansion
+    for ticker in APPROVED_ETFS:
+        print(f"\nFetching {ticker} (validated equity adapter)...")
+        try:
+            results[ticker] = save_etf(ticker, fetch_equity_expansion(ticker))
+        except Exception as exc:
+            print(f"  [{ticker}] FAILED: {exc}")
+            results[ticker] = "failed"
+        time.sleep(1)
+
     print("\nGenerating cross-ETF signals...")
     generate_multi_etf_signals()
 

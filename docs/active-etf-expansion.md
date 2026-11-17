@@ -31,3 +31,7 @@ python -m unittest discover -s tests -p test_equity_expansion.py -v
 python scripts/probe_equity_expansion.py
 
 Production onboarding requires a separate focused change after reviewing this report.
+
+## Live verification on November 17, 2026
+
+[GitHub read-only run](https://github.com/charliefanfan/AlphaRadar-backend/actions/runs/44094511148) completed successfully with 14 unit tests. Its candidate results are recorded in active-etf-expansion-results.json. Eleven equity adapters passed: AVUV, AVLV, CGCV, JEPI, JEPQ, JUSA, MFSG, MFSV, OAKM, PCLG, BCHP. LSGR parses locally but the GitHub runner rejects the issuer TLS certificate chain; TLS verification was not disabled. BUSA requires basket-to-holdings reconciliation. AVUS is blocked by a tickerless corporate-action equity residual. Five Dimensional funds lack a verified complete daily source; TCHP is a daily proxy portfolio. Supabase remains at 22 existing ETF codes and zero rows for these 20 candidates. Production branch files and schedules are untouched.

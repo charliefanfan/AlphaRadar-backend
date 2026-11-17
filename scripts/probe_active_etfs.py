@@ -92,6 +92,7 @@ def normalize(frame, ticker, today, context_date=None):
                             dates.add(parsed)
         records = []
         missing_ticker_weight = 0.0
+        missing_ticker_examples = []
         invalid_weight_rows = 0
         for values in frame.iloc[header_index + 1:].itertuples(index=False, name=None):
             symbol = clean_text(values[mapping['ticker']]).upper()
@@ -107,6 +108,7 @@ def normalize(frame, ticker, today, context_date=None):
                 continue
             if not symbol or symbol in {'NAN', '-', '--'}:
                 missing_ticker_weight += abs(weight)
+                missing_ticker_examples.append({'name': company, 'weight': weight})
                 continue
             if mapping['date'] is not None:
                 parsed = source_date(values[mapping['date']], today)
@@ -130,7 +132,7 @@ def normalize(frame, ticker, today, context_date=None):
         total = sum(r['weight'] for r in records)
         scale = 100 if ticker in {'CGUS', 'CGGO'} and 0.70 <= total <= 1.30 else 1
         if missing_ticker_weight * scale > 0.05:
-            raise ValueError('Material holdings have no ticker; needs an instrument-ID adapter')
+            raise ValueError(f'Material holdings have no ticker: {missing_ticker_examples[:8]}')
         if not 95 <= total * scale <= 105:
             raise ValueError(f'Unsafe/incomplete weight coverage: {total * scale:.4f}%')
         seen = set()
@@ -183,12 +185,15 @@ def get(session, url, domain):
     raise ValueError('Too many issuer redirects')
 
 
-def fetch(ticker, session, today):
+def fetch(ticker, session, today, capture=None):
     import requests
     from bs4 import BeautifulSoup
 
     domain, url = SPECS[ticker]
     response = get(session, url, domain)
+    if capture:
+        suffix = 'xlsx' if response.content.startswith(b'PK') else 'html'
+        (capture / f'{ticker}.source.{suffix}').write_bytes(response.content)
     if response.content.startswith(b'PK') or 'csv' in response.headers.get('Content-Type', '').lower():
         return parse_file(response.content, ticker, today), response.url
     soup = BeautifulSoup(response.text, 'html.parser')
@@ -219,7 +224,10 @@ def fetch(ticker, session, today):
             return parse_file(download.content, ticker, today), candidate
         except (ValueError, requests.RequestException):
             continue
-    raise ValueError('No validated full holdings download/table exposed; may need a dedicated API adapter')
+    hints = [a['href'] for a in soup.find_all('a', href=True)
+             if any(w in a['href'].lower() for w in ('holding', 'download', '.csv', '.xlsx'))]
+    scripts = [a.get('src') for a in soup.find_all('script', src=True)][:8]
+    raise ValueError(f'No validated full holdings table. Link hints: {hints[:10]}; scripts: {scripts}')
 
 
 def main():
@@ -237,7 +245,7 @@ def main():
     report = []
     for ticker in args.etfs:
         try:
-            records, url = fetch(ticker, session, today)
+            records, url = fetch(ticker, session, today, capture=output)
             with_shares = sum(r['shares'] is not None for r in records)
             result = {'etf': ticker, 'status': 'validated' if with_shares == len(records) else 'weight_only',
                       'date': records[0]['date'], 'rows': len(records), 'with_shares': with_shares,

@@ -1,0 +1,46 @@
+name: Probe active ETF candidates (no database)
+on:
+  push:
+    branches: [feat/probe-active-etf-candidates]
+    paths:
+      - scripts/probe_active_candidates.py
+      - scripts/active_candidate_adapter.py
+      - scripts/fetch_holdings.py
+      - scripts/bootstrap_active_candidates.py
+      - tests/test_active_candidate_adapter.py
+      - .github/workflows/probe_active_candidates.yml
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -p 'test_active_candidate_adapter.py' -v
+      - name: Probe every candidate without database credentials
+        run: python -u scripts/probe_active_candidates.py
+      - name: Validate all production candidate fetchers without database credentials
+        run: |
+          PYTHONPATH=scripts python -u - <<'PY'
+          import ast
+          from pathlib import Path
+          from bootstrap_active_candidates import validate_all
+          from active_candidate_adapter import ENABLED_ETFS
+          from equity_expansion_adapter import APPROVED_ETFS
+          assert not set(ENABLED_ETFS).intersection(APPROVED_ETFS)
+          ast.parse(Path('scripts/fetch_holdings.py').read_text())
+          for ticker, df in validate_all().items():
+              print('INTEGRATION_OK', ticker, len(df), df.iloc[0]['date'], flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: active-candidate-source-audit
+          path: artifacts/active-candidates/
+          retention-days: 7
+

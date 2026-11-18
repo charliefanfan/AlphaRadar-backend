@@ -41,6 +41,10 @@ on:
     - cron: '0 23 * * 1-5'   # US Eastern 6pm EST / 7pm EDT
   workflow_dispatch:
 
+concurrency:
+  group: alpharadar-holdings-write
+  cancel-in-progress: false
+
 jobs:
   update:
     runs-on: ubuntu-latest

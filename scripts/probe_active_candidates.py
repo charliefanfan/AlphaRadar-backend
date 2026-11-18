@@ -171,11 +171,12 @@ def main():
     for t, slug in JANUS.items():
         jobs.append((t, 'Janus Henderson', [], 'https://www.janushenderson.com/en-us/institutional/product/'+slug+'/full-holdings/'))
     jobs.append(('JPLG', 'JPMorgan UCITS (London)', [], 'https://am.jpmorgan.com/fr/en/asset-management/institutional/products/jpm-global-equity-multi-factor-ucits-etf-usd-acc-ie00bjrcll96'))
-    jobs.append(('GTEK', 'Goldman Sachs', [], 'https://am.gs.com/en-us/advisors/products/active-etfs'))
+    jobs.append(('GTEK', 'Goldman Sachs', [], 'https://am.gs.com/en-us/individual/funds/detail/PV103849/38149W812/goldman-sachs-future-tech-leaders-equity-etf'))
     jobs.append(('GSGO', 'Goldman Sachs', [], 'https://am.gs.com/en-us/advisors/funds/detail/PV109510/38149W440/goldman-sachs-growth-opportunities-etf'))
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda job: probe(*job), jobs))
     deep_audit()
+    probe_goldman_api()
     validations=validate_candidates()
     for r in results:
         if r['ticker'] in validations:
@@ -279,6 +280,21 @@ def deep_audit():
                         print('ALGERFRAMECONTENT '+json.dumps({'url':final,'snippets':[st[max(0,m.start()-100):m.end()+300] for m in list(re.finditer(r'ETFDailyHoldingsCSVLink|IsTransparent|postMessage|dataTicker|\.js|\.json|api/',st,re.I))[:20]]}),flush=True)
                     except Exception as e:
                         print('ALGERFRAMEERROR',str(e),flush=True)
+            from urllib.parse import parse_qs, unquote
+            for frame in frames:
+                if 'appredirect' not in frame.get('src','').lower():
+                    continue
+                target=parse_qs(urlparse(frame['src']).query).get('redirect_uri',[''])[0]
+                for t,code in ALGER.items():
+                    u=re.sub(r'productCode=productCodeValue','productCode='+code,target)
+                    try:
+                        b,final,_=get(u)
+                        (OUT/(t+'-dataframe.html')).write_bytes(b)
+                        st=b.decode(errors='replace')
+                        print('ALGERDATAFRAME '+json.dumps({'ticker':t,'url':final,'bytes':len(b),
+                            'snippets':[st[max(0,m.start()-120):m.end()+500] for m in list(re.finditer(r'ETFDailyHoldingsCSVLink|IsTransparent|dataTicker|\.json|url:|\.ajax|\.asmx|postMessage|src=',st,re.I))[:25]]}),flush=True)
+                    except Exception as e:
+                        print('ALGERDATAFRAMEERROR',t,str(e),flush=True)
         tab = []
         for table in soup.find_all('table'):
             rows = [[c.get_text(' ',strip=True) for c in tr.find_all(['th','td'])] for tr in table.find_all('tr')]
@@ -300,6 +316,26 @@ def deep_audit():
                     print('JSDETAIL '+json.dumps({'ticker':ticker,'url':final,'fragments':fragments}),flush=True)
                 except Exception as e:
                     print('JSERROR',ticker,u,str(e),flush=True)
+
+
+def probe_goldman_api():
+    query='query getFundsDetail($fundDetailRequest: FundDetailRequest) { fundsDetail(fundDetailRequest: $fundDetailRequest) { fundName ticker cusip allHoldings { asAtDate holdings { coupon cusip holding isin marketValue maturityDate numberOfShares order portfolio sedol ticker } } } }'
+    for ticker,pv,cusip in [('GTEK','PV103849','38149W812'),('GSGO','PV109510','38149W440')]:
+        try:
+            r=requests.post('https://am.gs.com/services/funds',json={'query':query,'variables':{'fundDetailRequest':{
+                'country':'us','language':'en','audience':'individual','pvNumber':pv,'shareClassId':cusip}}},
+                headers={'User-Agent':'Mozilla/5.0','Referer':'https://am.gs.com/en-us/individual/funds'},timeout=30,allow_redirects=False)
+            r.raise_for_status()
+            obj=r.json()
+            (OUT/(ticker+'-api.json')).write_text(json.dumps(obj,indent=2))
+            data=obj.get('data',{}).get('fundsDetail') or {}
+            full=data.get('allHoldings') or {}
+            holdings=full.get('holdings') or []
+            print('GOLDMAN_API '+json.dumps({'requested':ticker,'identity':{k:data.get(k) for k in ('fundName','ticker','cusip')},
+                'date':full.get('asAtDate'),'rows':len(holdings),'sample':holdings[:3],
+                'total_portfolio':sum(float(h.get('portfolio') or 0) for h in holdings),'errors':obj.get('errors')}),flush=True)
+        except Exception as e:
+            print('GOLDMAN_API_ERROR',ticker,str(e),flush=True)
 
 
 if __name__ == '__main__':

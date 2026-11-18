@@ -93,7 +93,9 @@ def parse(ticker,content,today=None):
         soup=BeautifulSoup(content,'html.parser')
         heading=soup.find('h1')
         if not heading or heading.get_text(' ',strip=True)!=TRP_NAMES[ticker] or not re.search(r'\b'+ticker+r'\b',soup.get_text(' ',strip=True)):
-            raise ValueError('T. Rowe fund identity mismatch')
+            raise ValueError('T. Rowe identity diagnostics: '+json.dumps({'h1':[h.get_text(' ',strip=True) for h in soup.find_all('h1')],
+                'canonical':[l.get('href') for l in soup.find_all('link',rel='canonical')],
+                'components':[{k:v for k,v in c.attrs.items() if k!='data-component-object'} for c in soup.select('[data-component-object]') if 'holding' in c.name]}))
         components=[c for c in soup.select('[data-component-object]') if 'holding' in c.name]
         if len(components)!=1:
             raise ValueError('Full holdings component missing or ambiguous')

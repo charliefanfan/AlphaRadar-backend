@@ -1,4 +1,7 @@
 import csv
+import html
+import importlib.util
+import json
 import sys
 import unittest
 from datetime import date
@@ -79,6 +82,29 @@ class CandidateParserTests(unittest.TestCase):
         self.assertEqual(len(records),5)
         self.assertEqual(audit['equity_weight'],60)
         self.assertEqual(records[0]['weight'],12)
+
+    @unittest.skipUnless(importlib.util.find_spec('bs4'),'BeautifulSoup unavailable locally; runs in CI')
+    def test_trowe_uses_full_portfolio_and_excludes_private_positions(self):
+        holdings=[dict(name='Stock COMMON STOCK',tickerSymbol='STK'+str(i),percentageTotalNetAssets=18,
+            shareQuantity=100,investmentType='LT',strikePrice=0) for i in range(5)]
+        holdings.append(dict(name='PRIVATE SERIES H',tickerSymbol=None,percentageTotalNetAssets=10,
+            shareQuantity=5,investmentType='LT',strikePrice=0))
+        obj={'full':{'effectiveDate':'2026-11-17T00:00:00Z','holdings':holdings},
+             'proxyPortfolio':{'holdings':[{'tickerSymbol':'FAKE'}]}}
+        data=('<h1>Growth ETF</h1><div>TGRT</div>'
+            '<pop-holdings-component data-component-object="'+html.escape(json.dumps(obj),quote=True)+'"></pop-holdings-component>').encode()
+        records,audit=parse('TGRT',data,self.today)
+        self.assertEqual(len(records),5)
+        self.assertEqual(audit['equity_weight'],90)
+        self.assertNotIn('FAKE',[r['ticker'] for r in records])
+
+    @unittest.skipUnless(importlib.util.find_spec('bs4'),'BeautifulSoup unavailable locally; runs in CI')
+    def test_trowe_proxy_only_fails(self):
+        obj={'full':None,'proxyPortfolio':{'holdings':[{'tickerSymbol':'FAKE'}]}}
+        data=('<h1>Growth ETF</h1><div>TGRT</div>'
+            '<pop-holdings-component data-component-object="'+html.escape(json.dumps(obj),quote=True)+'"></pop-holdings-component>').encode()
+        with self.assertRaisesRegex(ValueError,'proxy basket'):
+            parse('TGRT',data,self.today)
 
 
 if __name__=='__main__':

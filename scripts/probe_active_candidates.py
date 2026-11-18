@@ -267,6 +267,18 @@ def deep_audit():
                 'snippets':[raw[max(0,m.start()-130):m.end()+250] for m in list(re.finditer(r'holdings|portfolioId|download.*?csv',raw,re.I))[:20]]}),flush=True)
         if ticker=='ALAI':
             print('ALGERINIT '+json.dumps([raw[max(0,m.start()-150):m.end()+500] for m in list(re.finditer(r'product\.init|product\.data\s*=|\.json|webservice|productData|dataURL',raw,re.I))[:15]]),flush=True)
+            frames=[dict(t.attrs) for t in soup.find_all('iframe')]
+            print('ALGERFRAMES '+json.dumps(frames),flush=True)
+            for idx,frame in enumerate(frames):
+                url=urljoin('https://www.alger.com',frame.get('src',''))
+                if official(url) and ('product' in url.lower() or 'appredirect' in url.lower()):
+                    try:
+                        body,final,_=get(url)
+                        (OUT/f'ALAI-frame-{idx}.html').write_bytes(body)
+                        st=body.decode(errors='replace')
+                        print('ALGERFRAMECONTENT '+json.dumps({'url':final,'snippets':[st[max(0,m.start()-100):m.end()+300] for m in list(re.finditer(r'ETFDailyHoldingsCSVLink|IsTransparent|postMessage|dataTicker|\.js|\.json|api/',st,re.I))[:20]]}),flush=True)
+                    except Exception as e:
+                        print('ALGERFRAMEERROR',str(e),flush=True)
         tab = []
         for table in soup.find_all('table'):
             rows = [[c.get_text(' ',strip=True) for c in tr.find_all(['th','td'])] for tr in table.find_all('tr')]

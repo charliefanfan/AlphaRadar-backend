@@ -16,6 +16,9 @@ ISHARES = {'BGRO': '337538', 'BALI': '333207'}
 JPM = {'JEPI': '46641Q332', 'JEPQ': '46654Q203', 'JPEF': '46654Q781', 'JPSV': '46654Q708'}
 JANUS = {'JXX', 'JMID'}
 TRP = {'TGRT':'growth-etf', 'TCAF':'capital-appreciation-equity-etf', 'TVAL':'value-etf'}
+TRP_NAMES={'TGRT':'Growth ETF','TCAF':'Capital Appreciation Equity ETF','TVAL':'Value ETF'}
+# Issuer CSV has blank country/sector for this disclosed common-stock position.
+TEMA_EQUITY_IDENTITIES={'SLS':('81642T209','SELLAS LIFE SCIENCES GROUP INC')}
 
 
 def clean(v):
@@ -88,8 +91,8 @@ def parse(ticker,content,today=None):
     if ticker in TRP:
         from bs4 import BeautifulSoup
         soup=BeautifulSoup(content,'html.parser')
-        canonical=soup.find('link',rel='canonical')
-        if not canonical or not canonical.get('href','').split('?')[0].endswith('/'+TRP[ticker]+'.html'):
+        heading=soup.find('h1')
+        if not heading or heading.get_text(' ',strip=True)!=TRP_NAMES[ticker] or not re.search(r'\b'+ticker+r'\b',soup.get_text(' ',strip=True)):
             raise ValueError('T. Rowe fund identity mismatch')
         components=[c for c in soup.select('[data-component-object]') if 'holding' in c.name]
         if len(components)!=1:
@@ -120,6 +123,8 @@ def parse(ticker,content,today=None):
             elif re.search(r'\bSPV\b|\bSWAP\b|\bTRS\b', name+' '+r['ticker']):
                 kind='private_or_swap'
             elif r['is_cash']=='0' and r['sector'] and r['country']:
+                kind='equity'
+            elif r['is_cash']=='0' and TEMA_EQUITY_IDENTITIES.get(r['ticker'])==(r['cusip'],name):
                 kind='equity'
             else:
                 raise ValueError('Unclassified Tema asset: '+name)

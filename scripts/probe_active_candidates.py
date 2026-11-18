@@ -183,6 +183,52 @@ def main():
     if os.getenv('GITHUB_STEP_SUMMARY'):
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
             f.write(summary)
+    deep_audit()
+
+
+def deep_audit():
+    for p in sorted(OUT.glob('*-holdings.*')):
+        if p.suffix == '.html':
+            continue
+        for name, f in tables(p.read_bytes()).items():
+            for i in range(min(60, len(f))):
+                h = [str(v).strip() for v in f.iloc[i]]
+                if not any(v.lower() in {'ticker', 'symbol'} for v in h):
+                    continue
+                f = f.iloc[i+1:].copy()
+                f.columns = h
+                kinds = [v for v in h if v.lower() in {'type', 'asset class', 'asset type', 'security type', 'is_cash'}]
+                weights = [v for v in h if v.lower() in {'percent_of_nav', 'weight (%)', 'percent of net assets', '% of net assets'}]
+                print('DETAIL '+json.dumps({'file': p.name, 'sheet': name,
+                    'types': {k: f[k].fillna('').astype(str).value_counts().to_dict() for k in kinds},
+                    'weights': {k: float(pd.to_numeric(f[k].astype(str).str.replace('%','',regex=False).str.replace(',','',regex=False),errors='coerce').sum()) for k in weights},
+                    'tail': f.tail(6).fillna('').astype(str).values.tolist()}, default=str), flush=True)
+                break
+    for ticker in ('TCAF', 'ALAI', 'JXX', 'JMID', 'FBCG', 'FBCV', 'FMAG', 'GTEK'):
+        path = OUT / (ticker+'-page.html')
+        if not path.exists():
+            continue
+        raw = path.read_text(errors='replace')
+        soup = BeautifulSoup(raw, 'html.parser')
+        tab = []
+        for table in soup.find_all('table'):
+            rows = [[c.get_text(' ',strip=True) for c in tr.find_all(['th','td'])] for tr in table.find_all('tr')]
+            if any(any('ticker' in c.lower() or 'symbol' in c.lower() for c in r) for r in rows[:3]):
+                tab.append({'rows': len(rows), 'head': rows[:3], 'tail': rows[-2:]})
+        scripts = [urljoin('https://www.troweprice.com' if ticker=='TCAF' else 'https://www.alger.com' if ticker=='ALAI' else 'https://am.gs.com', s['src']) for s in soup.select('script[src]')]
+        snippets = [raw[max(0,m.start()-180):m.end()+250] for m in list(re.finditer(r'data-product|productCode|apiEndpoint|fundCode|fundId|holdingsUrl|dailyhold|\.csv|GTEK|As of|AS OF', raw, re.I))[:18]]
+        print('PAGEDETAIL '+json.dumps({'ticker':ticker, 'tables':tab,'scripts':scripts,'snippets':snippets},default=str),flush=True)
+        if ticker in {'TCAF','ALAI'}:
+            candidates = [u for u in scripts if official(u) and re.search('clientlib|product|fund|main|bundle',u,re.I)]
+            for n,u in enumerate(candidates[-4:]):
+                try:
+                    data, final, _ = get(u)
+                    (OUT / f'{ticker}-script-{n}.js').write_bytes(data)
+                    js = data.decode('utf-8',errors='replace')
+                    fragments = [js[max(0,m.start()-150):m.end()+250] for m in list(re.finditer(r'dailyholding|portfolioholding|allholding|holdings\.json|api/|serviceurl|webservice|\.asmx|\.svc',js,re.I))[:30]]
+                    print('JSDETAIL '+json.dumps({'ticker':ticker,'url':final,'fragments':fragments}),flush=True)
+                except Exception as e:
+                    print('JSERROR',ticker,u,str(e),flush=True)
 
 
 if __name__ == '__main__':

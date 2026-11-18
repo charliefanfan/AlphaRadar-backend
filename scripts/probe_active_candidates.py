@@ -184,6 +184,21 @@ def main():
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
             f.write(summary)
     deep_audit()
+    validate_candidates()
+
+
+def validate_candidates():
+    from active_candidate_adapter import parse, TEMA, CAPITAL, ISHARES, JPM, JANUS
+    for ticker in sorted(TEMA | CAPITAL | set(ISHARES) | set(JPM) | JANUS):
+        paths = list(OUT.glob(ticker+'-holdings.*')) if ticker not in JANUS else [OUT/(ticker+'-page.html')]
+        try:
+            if len(paths)!=1:
+                raise ValueError('Expected exactly one downloaded source')
+            records, audit = parse(ticker, paths[0].read_bytes(), TODAY)
+            (OUT/(ticker+'-normalized.json')).write_text(json.dumps({'audit':audit,'records':records},indent=2))
+            print('VALIDATED '+json.dumps({'ticker':ticker,**{k:v for k,v in audit.items() if k!='excluded'},'excluded_types':sorted({r['kind'] for r in audit['excluded']})}),flush=True)
+        except Exception as e:
+            print('REJECTED '+json.dumps({'ticker':ticker,'reason':str(e)}),flush=True)
 
 
 def deep_audit():
@@ -210,6 +225,14 @@ def deep_audit():
             continue
         raw = path.read_text(errors='replace')
         soup = BeautifulSoup(raw, 'html.parser')
+        if ticker=='TCAF':
+            for component in soup.select('[data-component-object]'):
+                if 'holding' in component.name:
+                    obj=json.loads(component['data-component-object'])
+                    (OUT/'TCAF-component.json').write_text(json.dumps(obj,indent=2))
+                    print('TRPCOMPONENT '+json.dumps(obj)[:20000],flush=True)
+        if ticker=='GTEK':
+            print('GSFUNDS '+json.dumps(links(path.read_bytes(),'https://am.gs.com','funds/detail|gtek|growth-opportunities|technology-opportunities')),flush=True)
         tab = []
         for table in soup.find_all('table'):
             rows = [[c.get_text(' ',strip=True) for c in tr.find_all(['th','td'])] for tr in table.find_all('tr')]
@@ -225,7 +248,7 @@ def deep_audit():
                     data, final, _ = get(u)
                     (OUT / f'{ticker}-script-{n}.js').write_bytes(data)
                     js = data.decode('utf-8',errors='replace')
-                    fragments = [js[max(0,m.start()-150):m.end()+250] for m in list(re.finditer(r'dailyholding|portfolioholding|allholding|holdings\.json|api/|serviceurl|webservice|\.asmx|\.svc',js,re.I))[:30]]
+                    fragments = [js[max(0,m.start()-150):m.end()+350] for m in list(re.finditer(r'\.getJSON|url:|\.ajax|/api/|\.asmx|\.svc|https:',js,re.I))[:18]]
                     print('JSDETAIL '+json.dumps({'ticker':ticker,'url':final,'fragments':fragments}),flush=True)
                 except Exception as e:
                     print('JSERROR',ticker,u,str(e),flush=True)

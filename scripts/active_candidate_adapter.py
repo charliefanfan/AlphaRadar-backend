@@ -17,6 +17,7 @@ JPM = {'JEPI': '46641Q332', 'JEPQ': '46654Q203', 'JPEF': '46654Q781', 'JPSV': '4
 JANUS = {'JXX', 'JMID'}
 TRP = {'TGRT':'growth-etf', 'TCAF':'capital-appreciation-equity-etf', 'TVAL':'value-etf'}
 TRP_NAMES={'TGRT':'Growth ETF','TCAF':'Capital Appreciation Equity ETF','TVAL':'Value ETF'}
+TRP_CODES={'TGRT':'GRX','TCAF':'CFX','TVAL':'VLX'}
 # Issuer CSV has blank country/sector for this disclosed common-stock position.
 TEMA_EQUITY_IDENTITIES={'SLS':('81642T209','SELLAS LIFE SCIENCES GROUP INC')}
 
@@ -92,13 +93,13 @@ def parse(ticker,content,today=None):
         from bs4 import BeautifulSoup
         soup=BeautifulSoup(content,'html.parser')
         heading=soup.find('h1')
-        if not heading or heading.get_text(' ',strip=True)!=TRP_NAMES[ticker] or not re.search(r'\b'+ticker+r'\b',soup.get_text(' ',strip=True)):
-            raise ValueError('T. Rowe identity diagnostics: '+json.dumps({'h1':[h.get_text(' ',strip=True) for h in soup.find_all('h1')],
-                'canonical':[l.get('href') for l in soup.find_all('link',rel='canonical')],
-                'components':[{k:v for k,v in c.attrs.items() if k!='data-component-object'} for c in soup.select('[data-component-object]') if 'holding' in c.name]}))
+        if not heading or heading.get_text(' ',strip=True)!=TRP_NAMES[ticker]+' '+ticker:
+            raise ValueError('T. Rowe fund identity mismatch')
         components=[c for c in soup.select('[data-component-object]') if 'holding' in c.name]
         if len(components)!=1:
             raise ValueError('Full holdings component missing or ambiguous')
+        if components[0].get('data-product-code')!=TRP_CODES[ticker] or components[0].get('data-columns-config')!='etf-fully-transparent-config':
+            raise ValueError('Unverified T. Rowe fund or transparency configuration')
         data=json.loads(components[0]['data-component-object'])
         full=data.get('full')
         if not full or not full.get('holdings'):

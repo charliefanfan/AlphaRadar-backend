@@ -24,6 +24,8 @@ JPM = {'JEPI': '46641Q332', 'JEPQ': '46654Q203', 'JPEF': '46654Q781', 'JPSV': '4
 TRP = ('TCHP', 'TGRT', 'TCAF', 'TVAL', 'TEQI')
 FIDELITY = ('FBCG', 'FBCV', 'FMAG')
 ALGER = {'ALAI': '2494', 'ATFV': '2489'}
+ALGER_CSV={'ALAI':'https://www.alger.com/AlgerETFDailyHoldings/Daily_Holdings_Alger_AI_Enablers_%26_Adopters_ETF.csv',
+           'ATFV':'https://www.alger.com/AlgerETFDailyHoldings/Daily_Holdings_Alger_35_ETF.csv'}
 JANUS = {'JXX': 'transformational-growth-etf-jxx', 'JMID': 'mid-cap-growth-alpha-etf-jmid'}
 ROOTS = ('temaetfs.com', 'capitalgroup.com', 'ishares.com', 'jpmorgan.com',
          'troweprice.com', 'fidelity.com', 'alger.com', 'janushenderson.com',
@@ -167,7 +169,7 @@ def main():
     for t in FIDELITY:
         jobs.append((t, 'Fidelity', [], 'https://research2.fidelity.com/fidelity/screeners/etf/etfholdings.asp?symbol='+t+'&view=Holdings'))
     for t, code in ALGER.items():
-        jobs.append((t, 'Alger', [], 'https://www.alger.com/pages/Products.aspx?productCode='+code))
+        jobs.append((t, 'Alger', [ALGER_CSV[t]], 'https://www.alger.com/pages/Products.aspx?productCode='+code))
     for t, slug in JANUS.items():
         jobs.append((t, 'Janus Henderson', [], 'https://www.janushenderson.com/en-us/institutional/product/'+slug+'/full-holdings/'))
     jobs.append(('JPLG', 'JPMorgan UCITS (London)', [], 'https://am.jpmorgan.com/fr/en/asset-management/institutional/products/jpm-global-equity-multi-factor-ucits-etf-usd-acc-ie00bjrcll96'))
@@ -175,8 +177,9 @@ def main():
     jobs.append(('GSGO', 'Goldman Sachs', [], 'https://am.gs.com/en-us/advisors/funds/detail/PV109510/38149W440/goldman-sachs-growth-opportunities-etf'))
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda job: probe(*job), jobs))
-    deep_audit()
-    probe_goldman_api()
+    if os.getenv('CANDIDATE_DIAGNOSTICS')=='1':
+        deep_audit()
+    goldman=probe_goldman_api()
     validations=validate_candidates()
     for r in results:
         if r['ticker'] in validations:
@@ -191,6 +194,8 @@ def main():
             r['validation']={'status':'rejected','reason':'Issuer identifies a semi-transparent ETF and a daily proxy portfolio'}
         elif r['ticker']=='JPLG':
             r['validation']={'status':'different_market','reason':'London-listed UCITS fund, not a US ETF; needs market-qualified identities'}
+        elif r['ticker'] in goldman:
+            r['validation']=goldman[r['ticker']]
         print('CANDIDATE '+json.dumps(r, ensure_ascii=False, default=str), flush=True)
     (OUT / 'report.json').write_text(json.dumps({'checked_at': datetime.now().isoformat(), 'results': results}, indent=2, default=str))
     summary = '| Ticker | Issuer | Result |\n|---|---|---|\n'
@@ -319,6 +324,7 @@ def deep_audit():
 
 
 def probe_goldman_api():
+    results={}
     query='query getFundsDetail($fundDetailRequest: FundDetailRequest) { fundsDetail(fundDetailRequest: $fundDetailRequest) { fundName ticker cusip allHoldings { asAtDate holdings { coupon cusip holding isin marketValue maturityDate numberOfShares order portfolio sedol ticker } } } }'
     for ticker,pv,cusip in [('GTEK','PV103849','38149W812'),('GSGO','PV109510','38149W440')]:
         try:
@@ -331,11 +337,22 @@ def probe_goldman_api():
             data=obj.get('data',{}).get('fundsDetail') or {}
             full=data.get('allHoldings') or {}
             holdings=full.get('holdings') or []
+            if data.get('ticker')!=ticker or data.get('cusip')!=cusip or len(holdings)<5 or obj.get('errors'):
+                raise ValueError('Goldman fund identity or full holdings mismatch')
+            from active_candidate_adapter import actual_date
+            d=actual_date(full.get('asAtDate'),TODAY)
+            weight=sum(float(h.get('portfolio') or 0) for h in holdings)
+            if not 95<=weight<=105:
+                raise ValueError('Goldman source weight coverage unsafe')
+            results[ticker]={'status':'official_json_available','date':d,'source_rows':len(holdings),
+                'full_weight':round(weight,6),'reason':'Full official daily JSON verified; asset classification and foreign listing mapping still needed'}
             print('GOLDMAN_API '+json.dumps({'requested':ticker,'identity':{k:data.get(k) for k in ('fundName','ticker','cusip')},
                 'date':full.get('asAtDate'),'rows':len(holdings),'sample':holdings[:3],
                 'total_portfolio':sum(float(h.get('portfolio') or 0) for h in holdings),'errors':obj.get('errors')}),flush=True)
         except Exception as e:
+            results[ticker]={'status':'rejected','reason':str(e)}
             print('GOLDMAN_API_ERROR',ticker,str(e),flush=True)
+    return results
 
 
 if __name__ == '__main__':

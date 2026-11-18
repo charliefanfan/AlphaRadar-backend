@@ -91,8 +91,8 @@ class CandidateParserTests(unittest.TestCase):
             shareQuantity=5,investmentType='LT',strikePrice=0))
         obj={'full':{'effectiveDate':'2026-11-17T00:00:00Z','holdings':holdings},
              'proxyPortfolio':{'holdings':[{'tickerSymbol':'FAKE'}]}}
-        data=('<h1>Growth ETF</h1><div>TGRT</div>'
-            '<pop-holdings-component data-component-object="'+html.escape(json.dumps(obj),quote=True)+'"></pop-holdings-component>').encode()
+        data=('<h1>Growth ETF TGRT</h1>'
+            '<pop-holdings-component data-product-code="GRX" data-columns-config="etf-fully-transparent-config" data-component-object="'+html.escape(json.dumps(obj),quote=True)+'"></pop-holdings-component>').encode()
         records,audit=parse('TGRT',data,self.today)
         self.assertEqual(len(records),5)
         self.assertEqual(audit['equity_weight'],90)
@@ -101,8 +101,8 @@ class CandidateParserTests(unittest.TestCase):
     @unittest.skipUnless(importlib.util.find_spec('bs4'),'BeautifulSoup unavailable locally; runs in CI')
     def test_trowe_proxy_only_fails(self):
         obj={'full':None,'proxyPortfolio':{'holdings':[{'tickerSymbol':'FAKE'}]}}
-        data=('<h1>Growth ETF</h1><div>TGRT</div>'
-            '<pop-holdings-component data-component-object="'+html.escape(json.dumps(obj),quote=True)+'"></pop-holdings-component>').encode()
+        data=('<h1>Growth ETF TGRT</h1>'
+            '<pop-holdings-component data-product-code="GRX" data-columns-config="etf-fully-transparent-config" data-component-object="'+html.escape(json.dumps(obj),quote=True)+'"></pop-holdings-component>').encode()
         with self.assertRaisesRegex(ValueError,'proxy basket'):
             parse('TGRT',data,self.today)
 

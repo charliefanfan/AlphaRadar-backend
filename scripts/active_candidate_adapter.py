@@ -1,6 +1,7 @@
 """Candidate parsers: real dates, full weight audit, equity-only output; no database."""
 from __future__ import annotations
 import csv
+import json
 import math
 import re
 from datetime import datetime
@@ -14,6 +15,7 @@ CAPITAL = {'CGXU', 'CGIE', 'CGCV', 'CGNG', 'CGBL'}
 ISHARES = {'BGRO': '337538', 'BALI': '333207'}
 JPM = {'JEPI': '46641Q332', 'JEPQ': '46654Q203', 'JPEF': '46654Q781', 'JPSV': '46654Q708'}
 JANUS = {'JXX', 'JMID'}
+TRP = {'TGRT':'growth-etf', 'TCAF':'capital-appreciation-equity-etf', 'TVAL':'value-etf'}
 
 
 def clean(v):
@@ -83,7 +85,32 @@ def row(symbol,name,weight,shares,kind,scale=1):
 def parse(ticker,content,today=None):
     today = today or datetime.now(ZoneInfo('America/New_York')).date()
     rows, dates = [], set()
-    if ticker in TEMA:
+    if ticker in TRP:
+        from bs4 import BeautifulSoup
+        soup=BeautifulSoup(content,'html.parser')
+        canonical=soup.find('link',rel='canonical')
+        if not canonical or not canonical.get('href','').split('?')[0].endswith('/'+TRP[ticker]+'.html'):
+            raise ValueError('T. Rowe fund identity mismatch')
+        components=[c for c in soup.select('[data-component-object]') if 'holding' in c.name]
+        if len(components)!=1:
+            raise ValueError('Full holdings component missing or ambiguous')
+        data=json.loads(components[0]['data-component-object'])
+        full=data.get('full')
+        if not full or not full.get('holdings'):
+            raise ValueError('No full actual holdings; proxy basket is not accepted')
+        dates.add(full['effectiveDate'][:10])
+        for r in full['holdings']:
+            name=clean(r['name']).upper(); symbol=clean(r['tickerSymbol'])
+            if name.startswith('CASH/CASH EQUIVALENT') or name in {'EURO CURRENCY','US DOLLAR','US DOLLARS'}:
+                kind='cash'
+            elif not symbol and (r['percentageTotalNetAssets']==0 or re.search(r'\bSERIES\b|\bCVT PFD\b',name)):
+                kind='private_or_rights'
+            elif r['investmentType']=='LT' and symbol and re.search(r'COMMON STOCK|\bADR\b|\bREIT\b|NY REG SH',name) and r['strikePrice']==0:
+                kind='equity'
+            else:
+                raise ValueError('Unclassified T. Rowe holding: '+name)
+            rows.append(row(symbol,r['name'],r['percentageTotalNetAssets'],r['shareQuantity'],kind))
+    elif ticker in TEMA:
         data = list(csv.DictReader(StringIO(content.decode('utf-8-sig'))))
         for r in data:
             dates.add(r['holdings_date'])

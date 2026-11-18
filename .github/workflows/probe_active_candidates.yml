@@ -4,6 +4,8 @@ on:
     branches: [feat/probe-active-etf-candidates]
     paths:
       - scripts/probe_active_candidates.py
+      - scripts/active_candidate_adapter.py
+      - tests/test_active_candidate_adapter.py
       - .github/workflows/probe_active_candidates.yml
 permissions:
   contents: read
@@ -17,6 +19,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -p 'test_active_candidate_adapter.py' -v
       - name: Probe every candidate without database credentials
         run: python -u scripts/probe_active_candidates.py
       - uses: actions/upload-artifact@v4

@@ -172,6 +172,7 @@ def main():
         jobs.append((t, 'Janus Henderson', [], 'https://www.janushenderson.com/en-us/institutional/product/'+slug+'/full-holdings/'))
     jobs.append(('JPLG', 'JPMorgan UCITS (London)', [], 'https://am.jpmorgan.com/fr/en/asset-management/institutional/products/jpm-global-equity-multi-factor-ucits-etf-usd-acc-ie00bjrcll96'))
     jobs.append(('GTEK', 'Goldman Sachs', [], 'https://am.gs.com/en-us/advisors/products/active-etfs'))
+    jobs.append(('GSGO', 'Goldman Sachs', [], 'https://am.gs.com/en-us/advisors/funds/detail/PV109510/38149W440/goldman-sachs-growth-opportunities-etf'))
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda job: probe(*job), jobs))
     for r in results:
@@ -219,20 +220,32 @@ def deep_audit():
                     'weights': {k: float(pd.to_numeric(f[k].astype(str).str.replace('%','',regex=False).str.replace(',','',regex=False),errors='coerce').sum()) for k in weights},
                     'tail': f.tail(6).fillna('').astype(str).values.tolist()}, default=str), flush=True)
                 break
-    for ticker in ('TCAF', 'ALAI', 'JXX', 'JMID', 'FBCG', 'FBCV', 'FMAG', 'GTEK'):
+    for ticker in ('TCAF', 'TGRT', 'TVAL', 'ALAI', 'JXX', 'JMID', 'FBCG', 'FBCV', 'FMAG', 'GTEK', 'GSGO'):
         path = OUT / (ticker+'-page.html')
         if not path.exists():
             continue
         raw = path.read_text(errors='replace')
         soup = BeautifulSoup(raw, 'html.parser')
-        if ticker=='TCAF':
+        if ticker in {'TCAF','TGRT','TVAL'}:
             for component in soup.select('[data-component-object]'):
                 if 'holding' in component.name:
                     obj=json.loads(component['data-component-object'])
-                    (OUT/'TCAF-component.json').write_text(json.dumps(obj,indent=2))
-                    print('TRPCOMPONENT '+json.dumps(obj)[:20000],flush=True)
+                    (OUT/(ticker+'-component.json')).write_text(json.dumps(obj,indent=2))
+                    full=obj.get('full') or {}
+                    holdings=full.get('holdings') or []
+                    print('TRPCOMPONENT '+json.dumps({'ticker':ticker,'keys':list(obj),'full_keys':list(full),
+                        'date':full.get('effectiveDate'),'rows':len(holdings),
+                        'types':{k:sum(r.get('investmentType')==k for r in holdings) for k in {r.get('investmentType') for r in holdings}},
+                        'total':sum(r.get('percentageTotalNetAssets') or 0 for r in holdings),
+                        'special':[r for r in holdings if not r.get('tickerSymbol') or not re.search('COMMON STOCK| ADR',r.get('name',''))],
+                        'sample':holdings[:2]}),flush=True)
         if ticker=='GTEK':
             print('GSFUNDS '+json.dumps(links(path.read_bytes(),'https://am.gs.com','funds/detail|gtek|growth-opportunities|technology-opportunities')),flush=True)
+        if ticker=='GSGO':
+            print('GSDATA '+json.dumps({'links':links(path.read_bytes(),'https://am.gs.com','holding|csv|xlsx|download'),
+                'snippets':[raw[max(0,m.start()-130):m.end()+250] for m in list(re.finditer(r'holdings|portfolioId|download.*?csv',raw,re.I))[:20]]}),flush=True)
+        if ticker=='ALAI':
+            print('ALGERINIT '+json.dumps([raw[max(0,m.start()-150):m.end()+500] for m in list(re.finditer(r'product\.init|product\.data\s*=|\.json|webservice|productData|dataURL',raw,re.I))[:15]]),flush=True)
         tab = []
         for table in soup.find_all('table'):
             rows = [[c.get_text(' ',strip=True) for c in tr.find_all(['th','td'])] for tr in table.find_all('tr')]
@@ -242,13 +255,13 @@ def deep_audit():
         snippets = [raw[max(0,m.start()-180):m.end()+250] for m in list(re.finditer(r'data-product|productCode|apiEndpoint|fundCode|fundId|holdingsUrl|dailyhold|\.csv|GTEK|As of|AS OF', raw, re.I))[:18]]
         print('PAGEDETAIL '+json.dumps({'ticker':ticker, 'tables':tab,'scripts':scripts,'snippets':snippets},default=str),flush=True)
         if ticker in {'TCAF','ALAI'}:
-            candidates = [u for u in scripts if official(u) and re.search('clientlib|product|fund|main|bundle',u,re.I)]
+            candidates = [u for u in scripts if official(u) and re.search('clientlib|product|fund|main|bundle|/Alger.js',u,re.I)]
             for n,u in enumerate(candidates[-4:]):
                 try:
                     data, final, _ = get(u)
                     (OUT / f'{ticker}-script-{n}.js').write_bytes(data)
                     js = data.decode('utf-8',errors='replace')
-                    fragments = [js[max(0,m.start()-150):m.end()+350] for m in list(re.finditer(r'\.getJSON|url:|\.ajax|/api/|\.asmx|\.svc|https:',js,re.I))[:18]]
+                    fragments = [js[max(0,m.start()-150):m.end()+350] for m in list(re.finditer(r'\.getJSON|url:|\.ajax|/api/|\.asmx|\.svc|dataUrl|dataURL|\.json|product\.init|loadData',js,re.I))[:18]]
                     print('JSDETAIL '+json.dumps({'ticker':ticker,'url':final,'fragments':fragments}),flush=True)
                 except Exception as e:
                     print('JSERROR',ticker,u,str(e),flush=True)

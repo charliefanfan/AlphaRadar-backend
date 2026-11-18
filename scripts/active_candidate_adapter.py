@@ -7,6 +7,7 @@ import re
 from datetime import datetime
 from io import BytesIO, StringIO
 from zoneinfo import ZoneInfo
+from urllib.parse import urljoin, urlparse
 
 import pandas as pd
 
@@ -20,6 +21,59 @@ TRP_NAMES={'TGRT':'Growth ETF','TCAF':'Capital Appreciation Equity ETF','TVAL':'
 TRP_CODES={'TGRT':'GRX','TCAF':'CFX','TVAL':'VLX'}
 # Issuer CSV has blank country/sector for this disclosed common-stock position.
 TEMA_EQUITY_IDENTITIES={'SLS':('81642T209','SELLAS LIFE SCIENCES GROUP INC')}
+# CGCV/JEPI/JEPQ already run through equity_expansion_adapter. Overseas Capital
+# funds stay disabled until their listing identities are resolved.
+ENABLED_ETFS=('WELD','CANC','HRTS','VOLT','TOLL','DISK','LAZR','HLTH',
+    'CGBL','BGRO','BALI','JPEF','JPSV','JMID','JXX','TGRT','TCAF','TVAL')
+JANUS_SLUGS={'JXX':'transformational-growth-etf-jxx','JMID':'mid-cap-growth-alpha-etf-jmid'}
+
+
+def download(url):
+    import requests
+    allowed={'temaetfs.com','capitalgroup.com','ishares.com','am.jpmorgan.com',
+             'www.janushenderson.com','www.troweprice.com'}
+    with requests.Session() as session:
+        session.headers['User-Agent']='Mozilla/5.0 (AlphaRadar official holdings)'
+        for _ in range(6):
+            host=(urlparse(url).hostname or '').lower()
+            if urlparse(url).scheme!='https' or not any(host==h or host.endswith('.'+h) for h in allowed):
+                raise ValueError('Unverified issuer download host')
+            response=session.get(url,timeout=30,allow_redirects=False)
+            if response.is_redirect:
+                url=urljoin(url,response.headers['Location'])
+                continue
+            response.raise_for_status()
+            return response.content,url
+    raise ValueError('Too many issuer redirects')
+
+
+def fetch_candidate(ticker):
+    """Fetch a vetted fund without database access or synthetic dates/weights."""
+    if ticker not in ENABLED_ETFS:
+        raise ValueError('ETF is not enabled: '+ticker)
+    if ticker in TEMA:
+        from bs4 import BeautifulSoup
+        content,final=download('https://temaetfs.com/'+ticker.lower())
+        soup=BeautifulSoup(content,'html.parser')
+        urls=list(dict.fromkeys(urljoin(final,a['href']) for a in soup.select('a[href]')
+            if re.search('/'+ticker+r'-holdings[^/]*\.csv(?:\?|$)',a['href'])))
+        if len(urls)!=1:
+            raise ValueError('No unique fund-matched Tema CSV link')
+        url=urls[0]
+    elif ticker in CAPITAL:
+        url='https://www.capitalgroup.com/api/investments/investment-service/v1/etfs/'+ticker+'/download/daily-holdings?audience=advisor'
+    elif ticker in ISHARES:
+        url='https://www.ishares.com/us/products/'+ISHARES[ticker]+'/holdings/latest-holdings.csv'
+    elif ticker in JPM:
+        url='https://am.jpmorgan.com/FundsMarketingHandler/excel?type=dailyETFHoldings&cusip='+JPM[ticker]+'&country=us&role=adv&fundType=ETF&locale=en-US&isUnderlyingHolding=false&isProxyHolding=false'
+    elif ticker in JANUS:
+        url='https://www.janushenderson.com/en-us/institutional/product/'+JANUS_SLUGS[ticker]+'/full-holdings/'
+    else:
+        url='https://www.troweprice.com/financial-intermediary/us/en/investments/etfs/'+TRP[ticker]+'.html'
+    content,_=download(url)
+    records,audit=parse(ticker,content)
+    print(f"  [{ticker}] {len(records)} stocks as of {audit['date']}; original equity NAV weight {audit['equity_weight']:.6f}%")
+    return pd.DataFrame(records)
 
 
 def clean(v):
@@ -214,3 +268,4 @@ def parse(ticker,content,today=None):
     else:
         raise ValueError('No validated candidate parser: '+ticker)
     return finish(ticker,rows,dates,today)
+

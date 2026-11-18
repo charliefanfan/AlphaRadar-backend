@@ -2280,6 +2280,17 @@ def run():
             results[ticker] = "failed"
         time.sleep(1)
 
+    # New sources have independent failures and never register existing funds twice.
+    from active_candidate_adapter import ENABLED_ETFS, fetch_candidate
+    for ticker in ENABLED_ETFS:
+        print(f"\nFetching {ticker} (validated active equity adapter)...")
+        try:
+            results[ticker] = save_etf(ticker, fetch_candidate(ticker))
+        except Exception as exc:
+            print(f"  [{ticker}] FAILED: {exc}")
+            results[ticker] = "failed"
+        time.sleep(1)
+
     print("\nGenerating cross-ETF signals...")
     generate_multi_etf_signals()
 
@@ -2310,3 +2321,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+

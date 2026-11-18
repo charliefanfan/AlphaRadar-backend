@@ -1,0 +1,35 @@
+name: Bootstrap validated active ETFs
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/bootstrap_active_candidates.py
+      - .github/workflows/bootstrap_active_candidates.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: alpharadar-holdings-write
+  cancel-in-progress: false
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -p 'test_active_candidate_adapter.py' -v
+      - name: Validate all sources, save snapshots and verify idempotence
+        run: python -u scripts/bootstrap_active_candidates.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: enabled-active-etf-snapshots
+          path: artifacts/enabled-active-etfs/
+          retention-days: 7

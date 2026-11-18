@@ -4,7 +4,7 @@ Live official-source validation: [GitHub Actions run 44369649449](https://github
 
 ## Scope and interpretation
 
-All 36 candidate entries below were inspected, including corrected fund identities and additional examples from the requested issuers. **Parsed and audited means the downloaded snapshot passed this parser's identity/date/coverage checks; it does not establish ongoing source reliability, US listing identity, or production approval.** No changes were made to the scheduled ETL, database, or iOS project.
+All 36 candidate entries below were inspected, including corrected fund identities and additional examples from the requested issuers. **Parsed and audited means the downloaded snapshot passed this parser's identity/date/coverage checks; it does not establish ongoing source reliability, US listing identity, or production approval.** The audit stage made no production changes; the subsequent authorized deployment is recorded below.
 
 The parser preserves actual issuer dates and original NAV weight percentages, requires positive source coverage near 100%, rejects duplicate stock identities and unknown classifications, and excludes identified cash, fixed income, options, futures, equity-linked notes, SPVs, swaps, and private positions from the equity signal output. The full original source remains in the run artifacts. Filtered stock weights are not rescaled to 100%.
 
@@ -79,4 +79,35 @@ The parser preserves actual issuer dates and original NAV weight percentages, re
 
 The branch-specific `Probe active ETF candidates (no database)` workflow installs the existing pinned dependencies, runs `python -m unittest discover -s tests -p 'test_active_candidate_adapter.py' -v`, and runs `python -u scripts/probe_active_candidates.py`. Its artifact includes raw official downloads, normalized snapshots, and machine-readable and Markdown reports. Detailed exploratory diagnostics are opt-in through `CANDIDATE_DIAGNOSTICS=1`.
 
-Before enabling these in production, add issuer-specific fetching around the validated parsers, resolve remaining international/private security identity issues, and smoke-test that integration without database access. Existing production CGCV, JEPI and JEPQ are regression candidates and must not be registered twice.
+Existing production CGCV, JEPI and JEPQ remain on their original adapters and are not registered twice. CGXU/CGIE/CGNG, Alger and Goldman remain disabled until security identities and classifications are resolved.
+
+## Authorized production deployment — November 18, 2026
+
+[PR #6](https://github.com/charliefanfan/AlphaRadar-backend/pull/6) was merged as `2af36b0e55da333546201397f3140e1350308036`. The existing daily schedule now includes 18 additional official-source adapters. Existing 33 funds, including JEPI/JEPQ/CGCV, are retained. Scheduled and bootstrap database writers use the same concurrency group.
+
+[Bootstrap run 44372280105](https://github.com/charliefanfan/AlphaRadar-backend/actions/runs/44372280105) completed successfully. Every new source passed before writes began. Each snapshot was read back and compared with the parsed source, then saved again to verify the retry returned unchanged.
+
+Independent SQL verification: **51 funds**, **1154 new holdings**, **0 invalid new rows**, **0 identified cash/SPV/swap rows**, **0 first-import signals**. The existing `holdings_asof('2026-11-18')` RPC exposes all 51 funds.
+
+| New ETF | Issuer snapshot date | Stock rows | Original equity NAV weight (%) |
+|---|---|---:|---:|
+| BALI | 2026-11-17 | 190 | 96.46 |
+| BGRO | 2026-11-17 | 43 | 97.92 |
+| CANC | 2026-11-17 | 56 | 99.43 |
+| CGBL | 2026-11-17 | 74 | 58.56 |
+| DISK | 2026-11-17 | 16 | 92.5 |
+| HLTH | 2026-11-17 | 32 | 99.43 |
+| HRTS | 2026-11-17 | 45 | 99.59 |
+| JMID | 2026-11-17 | 94 | 99.98 |
+| JPEF | 2026-11-17 | 40 | 97.93 |
+| JPSV | 2026-11-17 | 118 | 97.61 |
+| JXX | 2026-11-17 | 23 | 98.43 |
+| LAZR | 2026-11-17 | 23 | 86.6 |
+| TCAF | 2026-11-18 | 92 | 98.609904 |
+| TGRT | 2026-11-18 | 88 | 99.416042 |
+| TOLL | 2026-11-17 | 36 | 89.08 |
+| TVAL | 2026-11-18 | 139 | 99.733618 |
+| VOLT | 2026-11-17 | 24 | 97.06 |
+| WELD | 2026-11-17 | 21 | 99.85 |
+
+The user's local Swift registry was reconciled to exactly the 51 database fund identifiers. Existing funds missing from the app received full names and categories; unpopulated CHAT/IETC filter entries were removed. Active Equity, Income and Balanced categories were added with exhaustive icon/color handling. Full-project Swift type checking and existing stock-scope/daily-signal checks passed. A full Xcode asset build was blocked by the local CoreSimulator runtime service, independently of Swift type checking.

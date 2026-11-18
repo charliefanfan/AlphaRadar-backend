@@ -175,31 +175,48 @@ def main():
     jobs.append(('GSGO', 'Goldman Sachs', [], 'https://am.gs.com/en-us/advisors/funds/detail/PV109510/38149W440/goldman-sachs-growth-opportunities-etf'))
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(lambda job: probe(*job), jobs))
+    deep_audit()
+    validations=validate_candidates()
     for r in results:
+        if r['ticker'] in validations:
+            r['validation']=validations[r['ticker']]
+        if r['ticker']=='RSHO':
+            r['validation']={'status':'renamed','reason':'Official product page redirects to WELD; do not add duplicate RSHO snapshots'}
+        elif r['ticker']=='LUX':
+            r['validation']={'status':'rejected','reason':'Only a stale 2025-08-07 cash-only file is available'}
+        elif r['ticker'] in {'FBCG','FBCV','FMAG'}:
+            r['validation']={'status':'rejected','reason':'Research page provides Basket Holdings as of 2026-09-30; not a current full daily portfolio'}
+        elif r['ticker'] in {'TCHP','TEQI'}:
+            r['validation']={'status':'rejected','reason':'Issuer identifies a semi-transparent ETF and a daily proxy portfolio'}
+        elif r['ticker']=='JPLG':
+            r['validation']={'status':'different_market','reason':'London-listed UCITS fund, not a US ETF; needs market-qualified identities'}
         print('CANDIDATE '+json.dumps(r, ensure_ascii=False, default=str), flush=True)
     (OUT / 'report.json').write_text(json.dumps({'checked_at': datetime.now().isoformat(), 'results': results}, indent=2, default=str))
     summary = '| Ticker | Issuer | Result |\n|---|---|---|\n'
-    summary += '\n'.join(f"| {r['ticker']} | {r['issuer']} | {r['status']} |" for r in results)
+    summary += '\n'.join(f"| {r['ticker']} | {r['issuer']} | {r.get('validation',{}).get('status',r['status'])} |" for r in results)
     (OUT / 'report.md').write_text(summary)
     if os.getenv('GITHUB_STEP_SUMMARY'):
         with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
             f.write(summary)
-    deep_audit()
-    validate_candidates()
 
 
 def validate_candidates():
-    from active_candidate_adapter import parse, TEMA, CAPITAL, ISHARES, JPM, JANUS
-    for ticker in sorted(TEMA | CAPITAL | set(ISHARES) | set(JPM) | JANUS):
-        paths = list(OUT.glob(ticker+'-holdings.*')) if ticker not in JANUS else [OUT/(ticker+'-page.html')]
+    from active_candidate_adapter import parse, TEMA, CAPITAL, ISHARES, JPM, JANUS, TRP
+    results={}
+    for ticker in sorted(TEMA | CAPITAL | set(ISHARES) | set(JPM) | JANUS | set(TRP)):
+        paths = list(OUT.glob(ticker+'-holdings.*')) if ticker not in JANUS | set(TRP) else [OUT/(ticker+'-page.html')]
         try:
             if len(paths)!=1:
                 raise ValueError('Expected exactly one downloaded source')
             records, audit = parse(ticker, paths[0].read_bytes(), TODAY)
             (OUT/(ticker+'-normalized.json')).write_text(json.dumps({'audit':audit,'records':records},indent=2))
+            results[ticker]={'status':'parsed_and_audited','date':audit['date'],'equity_rows':audit['equity_rows'],
+                'full_weight':audit['full_weight'],'equity_weight':audit['equity_weight']}
             print('VALIDATED '+json.dumps({'ticker':ticker,**{k:v for k,v in audit.items() if k!='excluded'},'excluded_types':sorted({r['kind'] for r in audit['excluded']})}),flush=True)
         except Exception as e:
+            results[ticker]={'status':'rejected','reason':str(e)}
             print('REJECTED '+json.dumps({'ticker':ticker,'reason':str(e)}),flush=True)
+    return results
 
 
 def deep_audit():
@@ -219,6 +236,10 @@ def deep_audit():
                     'types': {k: f[k].fillna('').astype(str).value_counts().to_dict() for k in kinds},
                     'weights': {k: float(pd.to_numeric(f[k].astype(str).str.replace('%','',regex=False).str.replace(',','',regex=False),errors='coerce').sum()) for k in weights},
                     'tail': f.tail(6).fillna('').astype(str).values.tolist()}, default=str), flush=True)
+                if p.name.startswith('CANC'):
+                    print('CANC_SPECIAL '+json.dumps(f[(f['sector'].fillna('')=='') & (f['is_cash'].astype(str)=='0')].fillna('').astype(str).to_dict('records')),flush=True)
+                if p.name.startswith('CGNG'):
+                    print('CAPITAL_DUPLICATES '+json.dumps(f[f['Ticker'].duplicated(False) & f['Asset Type'].eq('Equity')].fillna('').astype(str).to_dict('records')),flush=True)
                 break
     for ticker in ('TCAF', 'TGRT', 'TVAL', 'ALAI', 'JXX', 'JMID', 'FBCG', 'FBCV', 'FMAG', 'GTEK', 'GSGO'):
         path = OUT / (ticker+'-page.html')
@@ -261,6 +282,8 @@ def deep_audit():
                     data, final, _ = get(u)
                     (OUT / f'{ticker}-script-{n}.js').write_bytes(data)
                     js = data.decode('utf-8',errors='replace')
+                    if ticker=='ALAI' and 'product4.js' in u:
+                        print('ALGERLOADER '+json.dumps(js[:10000]),flush=True)
                     fragments = [js[max(0,m.start()-150):m.end()+350] for m in list(re.finditer(r'\.getJSON|url:|\.ajax|/api/|\.asmx|\.svc|dataUrl|dataURL|\.json|product\.init|loadData',js,re.I))[:18]]
                     print('JSDETAIL '+json.dumps({'ticker':ticker,'url':final,'fragments':fragments}),flush=True)
                 except Exception as e:

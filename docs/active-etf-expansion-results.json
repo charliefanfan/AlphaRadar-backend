@@ -1,0 +1,222 @@
+{
+  "verified_at": "2026-11-17",
+  "workflow_run": "https://github.com/charliefanfan/AlphaRadar-backend/actions/runs/44094511148",
+  "tests_passed": 14,
+  "production_changed": false,
+  "existing_database_etfs": 22,
+  "new_candidate_database_rows": 0,
+  "results": [
+    {
+      "etf": "DFAC",
+      "source": "https://www.dimensional.com/us-en/funds/dfac/us-core-equity-2-etf",
+      "source_sha256": "b21ae592b6f1c4a6d83dd9cbb8cb86559182a8699958d07f814a0c98034a93a8",
+      "status": "blocked",
+      "reason": "Official page retrieved, but no verified full daily holdings endpoint/table yet"
+    },
+    {
+      "etf": "DFAU",
+      "source": "https://www.dimensional.com/us-en/funds/dfau/us-core-equity-market-etf",
+      "source_sha256": "85d24000f0050f77657e81832a7bd03cfcb8653a0ca5478dca2f9d2dc98698fe",
+      "status": "blocked",
+      "reason": "Official page retrieved, but no verified full daily holdings endpoint/table yet"
+    },
+    {
+      "etf": "DCOR",
+      "source": "https://www.dimensional.com/us-en/funds/dcor/us-core-equity-1-etf",
+      "source_sha256": "9a89af72d6c3729360dc5079e71442d2cb3a7a8c658d128b5524af29f36cc7e0",
+      "status": "blocked",
+      "reason": "Official page retrieved, but no verified full daily holdings endpoint/table yet"
+    },
+    {
+      "etf": "DUHP",
+      "source": "https://www.dimensional.com/us-en/funds/duhp/us-high-profitability-etf",
+      "source_sha256": "cf59f52b5e8c3598dc35ab559b9ca84bd0b94cb1700a84be6d620c3c0eab506f",
+      "status": "blocked",
+      "reason": "Official page retrieved, but no verified full daily holdings endpoint/table yet"
+    },
+    {
+      "etf": "DFLV",
+      "source": "https://www.dimensional.com/us-en/funds/dflv/us-large-cap-value-etf",
+      "source_sha256": "02ba8a3bcdf7ca917b8febf64aa2843ef81b62a239a6403b6b86f5ea30e76b2f",
+      "status": "blocked",
+      "reason": "Official page retrieved, but no verified full daily holdings endpoint/table yet"
+    },
+    {
+      "etf": "AVUV",
+      "source": "https://www.avantisinvestors.com/avantis-investments/en-us/avantis-us-small-cap-value-etf/AVUV/",
+      "source_sha256": "0ac4c03394d0473527437777a0e7d3c585b6ac8a828e622a768e6b8d627b45d9",
+      "date": "2026-11-16",
+      "source_rows": 795,
+      "rows": 792,
+      "with_shares": 792,
+      "full_weight_total": 99.73,
+      "equity_weight_total": 99.69,
+      "excluded_rows": 3,
+      "status": "validated_equities"
+    },
+    {
+      "etf": "AVUS",
+      "source": "https://www.avantisinvestors.com/avantis-investments/en-us/avantis-us-equity-etf/AVUS/",
+      "source_sha256": "13e443ff244aa517bc5e6eca80933809f2b5ec9b52024112381e55d26709c716",
+      "status": "blocked",
+      "reason": "Equity has no tradable ticker: CONTRA ALBIREO PHARMA COMMON STOCK"
+    },
+    {
+      "etf": "AVLV",
+      "source": "https://www.avantisinvestors.com/avantis-investments/en-us/avantis-us-large-cap-value-etf/AVLV/",
+      "source_sha256": "f54063c7598da0f7f5118cf2259dbbb82b12001d4c61a65117a3af00454f0b10",
+      "date": "2026-11-16",
+      "source_rows": 302,
+      "rows": 299,
+      "with_shares": 299,
+      "full_weight_total": 99.8,
+      "equity_weight_total": 99.68,
+      "excluded_rows": 3,
+      "status": "validated_equities"
+    },
+    {
+      "etf": "CGCV",
+      "source": "https://www.capitalgroup.com/api/investments/investment-service/v1/etfs/CGCV/download/daily-holdings?audience=advisor",
+      "source_sha256": "7844d9b06699b86a27bbb157c720f478ab49f07238ca9bdc07513d76f9e6d4df",
+      "date": "2026-11-16",
+      "source_rows": 75,
+      "rows": 72,
+      "with_shares": 72,
+      "full_weight_total": 100.02,
+      "equity_weight_total": 98.26,
+      "excluded_rows": 3,
+      "status": "validated_equities"
+    },
+    {
+      "etf": "JEPI",
+      "source": "https://am.jpmorgan.com/FundsMarketingHandler/excel?type=dailyETFHoldings&cusip=46641Q332&country=us&role=adv&fundType=ETF&locale=en-US&isUnderlyingHolding=false&isProxyHolding=false",
+      "source_sha256": "aeb5a7051a6eb0d01db9b93613f5b80eae6947d7ec4ce42da4b7ad2019819fc3",
+      "date": "2026-11-16",
+      "source_rows": 136,
+      "rows": 118,
+      "with_shares": 118,
+      "full_weight_total": 99.74,
+      "equity_weight_total": 84.83,
+      "excluded_rows": 18,
+      "status": "validated_equities"
+    },
+    {
+      "etf": "JEPQ",
+      "source": "https://am.jpmorgan.com/FundsMarketingHandler/excel?type=dailyETFHoldings&cusip=46654Q203&country=us&role=adv&fundType=ETF&locale=en-US&isUnderlyingHolding=false&isProxyHolding=false",
+      "source_sha256": "9fb1a4458c6de05ee08460f031fbde1bf846af61533ba12ce99d107f7e368897",
+      "date": "2026-11-16",
+      "source_rows": 110,
+      "rows": 94,
+      "with_shares": 94,
+      "full_weight_total": 99.39,
+      "equity_weight_total": 81.15,
+      "excluded_rows": 16,
+      "status": "validated_equities"
+    },
+    {
+      "etf": "JUSA",
+      "source": "https://am.jpmorgan.com/FundsMarketingHandler/excel?type=dailyETFHoldings&cusip=46654Q617&country=us&role=adv&fundType=ETF&locale=en-US&isUnderlyingHolding=false&isProxyHolding=false",
+      "source_sha256": "7e76fe643f19d2e31c6e86c20c3daceb907407bdcfccd2ebc74097b5dffb5173",
+      "date": "2026-11-16",
+      "source_rows": 263,
+      "rows": 257,
+      "with_shares": 257,
+      "full_weight_total": 99.95,
+      "equity_weight_total": 98.74,
+      "excluded_rows": 6,
+      "status": "validated_equities"
+    },
+    {
+      "etf": "BUSA",
+      "source": "https://etfs.brandes.com/assets/data/6c11_Report.csv",
+      "source_sha256": "2a71eb806f14db7e8786530024e548a450731ae5cebcbf274046ea81e32a5ca3",
+      "date": "2026-11-16",
+      "source_rows": 67,
+      "rows": 67,
+      "with_shares": 67,
+      "full_weight_total": 98.433443,
+      "equity_weight_total": 98.433443,
+      "excluded_rows": 0,
+      "status": "needs_review",
+      "reason": "Official portfolio basket uses benchmark quantities; reconcile with actual full holdings before promotion"
+    },
+    {
+      "etf": "MFSG",
+      "source": "https://www.mfs.com/en-us/individual-investor/product-strategies/exchange-traded-funds/daily-holdings/MFSG-active-growth-etf.html",
+      "source_sha256": "300c7df99be70a6cf539fc9f2736115db976903fcf1ee5d2bd39f4e86dc945f4",
+      "date": "2026-11-16",
+      "source_rows": 62,
+      "rows": 61,
+      "with_shares": 61,
+      "full_weight_total": 99.98,
+      "equity_weight_total": 99.19,
+      "excluded_rows": 1,
+      "status": "validated_equities"
+    },
+    {
+      "etf": "MFSV",
+      "source": "https://www.mfs.com/en-us/individual-investor/product-strategies/exchange-traded-funds/daily-holdings/MFSV-active-value-etf.html",
+      "source_sha256": "286286e772539b28622afa993c9d3c5312b594d0ce2c35ff926fc5125313bb20",
+      "date": "2026-11-16",
+      "source_rows": 65,
+      "rows": 64,
+      "with_shares": 64,
+      "full_weight_total": 99.97,
+      "equity_weight_total": 99.2,
+      "excluded_rows": 1,
+      "status": "validated_equities"
+    },
+    {
+      "etf": "LSGR",
+      "source": "https://mkt.im.natixis.com/files/etfs/LSGR_daily_full_holdings.csv",
+      "status": "blocked",
+      "reason": "HTTPSConnectionPool(host='mkt.im.natixis.com', port=443): Max retries exceeded with url: /files/etfs/LSGR_daily_full_holdings.csv (Caused by SSLError(SSLCertVerificationError(1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1018)')))"
+    },
+    {
+      "etf": "OAKM",
+      "source": "https://oakmark.com/wp-content/uploads/etf_data/oakm_holdings.csv",
+      "source_sha256": "1802fd1e3c3982fbba23720a0269cae8607ed9d1d06b0867be774e17fb06606d",
+      "date": "2026-11-17",
+      "source_rows": 40,
+      "rows": 38,
+      "with_shares": 38,
+      "full_weight_total": 100,
+      "equity_weight_total": 99.19068,
+      "excluded_rows": 2,
+      "status": "validated_equities"
+    },
+    {
+      "etf": "PCLG",
+      "source": "https://www.polencapital.com/etfs/focus-growth-etf-pclg",
+      "source_sha256": "08db217bc1896848be58a7a05963d46ed495023e4d7329d66906d3b8b9a6355a",
+      "date": "2026-11-13",
+      "source_rows": 28,
+      "rows": 26,
+      "with_shares": 26,
+      "full_weight_total": 99.9999,
+      "equity_weight_total": 96.3217,
+      "excluded_rows": 2,
+      "status": "validated_equities"
+    },
+    {
+      "etf": "BCHP",
+      "source": "https://api.assetmgmt.principalam.com/public/files?key=BCHP.xlsx",
+      "source_sha256": "262fa8bf8bee49572a3a1c3ff20e69c692f70f5392ee0963e6b396bfd9f32c5e",
+      "date": "2026-11-17",
+      "source_rows": 27,
+      "rows": 25,
+      "with_shares": 25,
+      "full_weight_total": 100,
+      "equity_weight_total": 99.763122,
+      "excluded_rows": 2,
+      "status": "validated_equities"
+    },
+    {
+      "etf": "TCHP",
+      "source": "https://www.troweprice.com/financial-intermediary/us/en/investments/etfs/blue-chip-growth-etf.html",
+      "source_sha256": "a00e9116edff326c905ed1784dc674e94426e985e87834846ef2752b55b36f3d",
+      "status": "blocked",
+      "reason": "Semi-transparent ETF: daily proxy portfolio is not actual holdings; quarterly actual holdings are unsuitable for daily signals"
+    }
+  ]
+}

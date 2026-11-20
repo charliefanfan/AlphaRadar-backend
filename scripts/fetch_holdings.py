@@ -1423,15 +1423,23 @@ def _normalize_extra_holdings(raw, etf, source_date=None):
 
 def _load_snapshot(etf: str, snap_date: str) -> dict:
     """Return {ticker: {weight, shares}} for one stored snapshot."""
-    res = (
-        supabase.table("holdings")
-        .select("ticker,weight,shares")
-        .eq("etf", etf)
-        .eq("date", snap_date)
-        .execute()
-    )
+    rows = []
+    page_size = 500
+    while True:
+        page = (
+            supabase.table("holdings")
+            .select("ticker,weight,shares")
+            .eq("etf", etf)
+            .eq("date", snap_date)
+            .order("ticker")
+            .range(len(rows), len(rows) + page_size - 1)
+            .execute()
+        ).data or []
+        rows.extend(page)
+        if len(page) < page_size:
+            break
     out = {}
-    for row in res.data or []:
+    for row in rows:
         ticker = _norm_ticker(row["ticker"])
         weight = float(row["weight"]) if row.get("weight") is not None else None
         shares = float(row["shares"]) if row.get("shares") is not None else None
@@ -1545,6 +1553,10 @@ def _diff_snapshots(etf: str, old: dict, new: dict,
             "previous_weight": previous_weight,
             "current_weight": current_weight,
             "shares_delta": round(shares_delta, 8) if shares_delta is not None else None,
+            "shares_change_pct": (
+                round(shares_delta / previous_shares * 100.0, 8)
+                if shares_delta is not None and previous_shares > 0 else None
+            ),
             "previous_shares": previous_shares,
             "current_shares": current_shares,
             "shares_change_type": shares_change_type,

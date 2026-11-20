@@ -1,0 +1,54 @@
+name: New ETF Read-Only Probe
+
+on:
+  push:
+    branches: ['feat/active-etf-probe']
+    paths:
+      - 'scripts/probe_active_etfs.py'
+      - 'tests/test_probe_active_etfs.py'
+      - 'scripts/import_candidate_etfs.py'
+      - 'tests/test_import_candidate_etfs.py'
+      - '.github/workflows/candidate_etf_update.yml'
+      - '.github/workflows/probe_new_etfs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: new-etf-readonly-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install probe-only dependencies
+        run: pip install pandas==2.2.2 requests==2.32.3 openpyxl==3.1.5 beautifulsoup4==4.12.3
+      - name: Offline parser and isolation regressions
+        run: |
+          python -m unittest discover -s tests -p 'test_probe_active_etfs.py' -v
+          python -m unittest discover -s tests -p 'test_import_candidate_etfs.py' -v
+      - name: Download and validate official holdings without database access
+        run: python scripts/probe_active_etfs.py
+      - name: Require at least one validated snapshot
+        run: |
+          python - <<'PY'
+          import json
+          report = json.load(open('artifacts/new-etf-probe/report.json'))
+          assert any(r['status'] in ('validated', 'weight_only') for r in report), 'All candidates blocked; see report artifact'
+          PY
+      - name: Save read-only validation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: new-etf-readonly-probe
+          path: artifacts/new-etf-probe/
+          if-no-files-found: warn
+          retention-days: 7
